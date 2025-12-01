@@ -1,0 +1,6 @@
+name: PerWorldHardcore
+main: com.kylekriskovich.perworldhardcore.PerWorldHardcorePlugin
+version: 1.0.0
+api-version: 1.21
+author: KyleKriskovich
+description: Simple per-world hardcore test plugin
