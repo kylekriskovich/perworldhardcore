@@ -2,18 +2,13 @@ package com.kylekriskovich.perworldhardcore;
 
 import org.bukkit.Bukkit;
 import org.bukkit.plugin.java.JavaPlugin;
-import java.util.HashMap;
-import java.util.HashSet;
-import java.util.List;
-import java.util.Map;
-import java.util.Set;
-import java.util.UUID;
 import org.bukkit.configuration.file.FileConfiguration;
 import org.bukkit.configuration.file.YamlConfiguration;
+
+import java.util.*;
+
 import java.io.File;
 import java.io.IOException;
-
-
 
 
 public class PerWorldHardcorePlugin extends JavaPlugin {
