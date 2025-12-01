@@ -62,29 +62,34 @@ public class SimpleHardcoreListener implements Listener {
 
     @EventHandler(priority = EventPriority.HIGHEST, ignoreCancelled = true)
     public void onPlayerTeleport(PlayerTeleportEvent event) {
-
         Player player = event.getPlayer();
-        if (event.getTo() == null) return;
+        if (event.getTo() == null || event.getFrom() == null) return;
 
+        World fromWorld = event.getFrom().getWorld();
         World targetWorld = event.getTo().getWorld();
-        if (targetWorld == null) return;
+        if (fromWorld == null || targetWorld == null) return;
 
         String targetName = targetWorld.getName();
 
-        if (!plugin.isHardcoreWorld(targetName) && player.getGameMode() != GameMode.SURVIVAL) {
-            Bukkit.getScheduler().runTask(plugin, () -> {
-                player.setGameMode(GameMode.SURVIVAL);
-                player.sendMessage("Welcome to '" + targetName + "'. Your Gamemode has been updated to survival mode.");
-            });
+        // Only care if the *target* world is hardcore
+        if (!plugin.isHardcoreWorld(targetName)) {
             return;
         }
 
-        // If player already died in this hardcore world, block re-entry
+        // Only block if this is a CROSS-WORLD teleport (from X -> hardcore world Y)
+        boolean isWorldChange = !fromWorld.getName().equals(targetWorld.getName());
+        if (!isWorldChange) {
+            // Same-world teleport (e.g., moving around as spectator) – allow it
+            return;
+        }
+
+        // Now enforce the "you already died here" rule
         if (plugin.isPlayerDeadInWorld(player.getUniqueId(), targetName)) {
             event.setCancelled(true);
             player.sendMessage("You already died in hardcore world '" + targetName + "' and cannot return.");
         }
     }
+
 
 
 }

@@ -8,6 +8,10 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
+import org.bukkit.configuration.file.FileConfiguration;
+import org.bukkit.configuration.file.YamlConfiguration;
+import java.io.File;
+import java.io.IOException;
 
 
 
@@ -17,12 +21,14 @@ public class PerWorldHardcorePlugin extends JavaPlugin {
     private final Set<String> hardcoreWorlds = new HashSet<>();
     private final Map<UUID, Set<String>> deadWorlds = new HashMap<>();
 
+    private File dataFile;
+    private FileConfiguration dataConfig;
+
     @Override
     public void onEnable() {
         saveDefaultConfig();
-
-        // Debug: log exactly what Bukkit thinks the config is
-        getLogger().info("Config hardcore-worlds raw: " + getConfig().getStringList("hardcore-worlds"));
+        setupDataFile();
+        loadPlayerData();
 
         loadHardcoreWorlds();
         getLogger().info("PerWorldHardcore enabled. Hardcore worlds: " + hardcoreWorlds);
@@ -66,10 +72,71 @@ public class PerWorldHardcorePlugin extends JavaPlugin {
         if (uuid == null || worldName == null) return;
         deadWorlds.computeIfAbsent(uuid, k -> new HashSet<>()).add(worldName);
         getLogger().info("Marked " + uuid + " as dead in hardcore world '" + worldName + "'.");
+        savePlayerData(); // small plugin; fine to save eagerly
     }
+
+    private void setupDataFile() {
+        if (!getDataFolder().exists()) {
+            // plugins/PerWorldHardcore
+            getDataFolder().mkdirs();
+        }
+
+        dataFile = new File(getDataFolder(), "data.yml");
+        if (!dataFile.exists()) {
+            try {
+                dataFile.createNewFile();
+            } catch (IOException e) {
+                getLogger().severe("Could not create data.yml");
+                e.printStackTrace();
+            }
+        }
+
+        dataConfig = YamlConfiguration.loadConfiguration(dataFile);
+    }
+
+    private void loadPlayerData() {
+        deadWorlds.clear();
+
+        if (dataConfig == null || !dataConfig.isConfigurationSection("players")) {
+            return;
+        }
+
+        for (String uuidStr : dataConfig.getConfigurationSection("players").getKeys(false)) {
+            try {
+                UUID uuid = UUID.fromString(uuidStr);
+                var worlds = dataConfig.getStringList("players." + uuidStr + ".dead-worlds");
+                deadWorlds.put(uuid, new HashSet<>(worlds));
+            } catch (IllegalArgumentException ex) {
+                getLogger().warning("Invalid UUID in data.yml: " + uuidStr);
+            }
+        }
+
+        getLogger().info("Loaded dead player data for " + deadWorlds.size() + " players.");
+    }
+
+    public void savePlayerData() {
+        if (dataConfig == null) return;
+
+        dataConfig.set("players", null); // clear
+
+        for (Map.Entry<UUID, Set<String>> entry : deadWorlds.entrySet()) {
+            String uuidStr = entry.getKey().toString();
+            dataConfig.set("players." + uuidStr + ".dead-worlds",
+                    new ArrayList<>(entry.getValue()));
+        }
+
+        try {
+            dataConfig.save(dataFile);
+        } catch (IOException e) {
+            getLogger().severe("Could not save data.yml");
+            e.printStackTrace();
+        }
+    }
+
 
     @Override
     public void onDisable() {
+        savePlayerData();
         getLogger().info("PerWorldHardcore disabled.");
     }
 }
