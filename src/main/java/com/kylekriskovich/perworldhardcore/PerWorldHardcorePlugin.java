@@ -37,7 +37,7 @@ public class PerWorldHardcorePlugin extends JavaPlugin {
                 this
         );
 
-        Objects.requireNonNull(getCommand("pwhc"))
+        Objects.requireNonNull(getCommand("hcpw"))
                 .setExecutor(new HcpwCommand(this));
     }
 
