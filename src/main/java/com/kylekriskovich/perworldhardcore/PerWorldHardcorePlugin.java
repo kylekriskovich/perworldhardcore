@@ -1,26 +1,23 @@
 package com.kylekriskovich.perworldhardcore;
 
-import com.kylekriskovich.perworldhardcore.listener.SimpleHardcoreListener;
+import com.kylekriskovich.perworldhardcore.listener.HardcorePlayerListener;
 import com.kylekriskovich.perworldhardcore.command.HcpwCommand;
+import com.kylekriskovich.perworldhardcore.storage.HardcoreDataStorage;
 import org.bukkit.Bukkit;
 import org.bukkit.plugin.java.JavaPlugin;
 import org.bukkit.configuration.file.FileConfiguration;
-import org.bukkit.configuration.file.YamlConfiguration;
 import org.bukkit.World;
 
 import java.util.*;
 import java.util.Objects;
 
 import java.io.File;
-import java.io.IOException;
 
 
 public class PerWorldHardcorePlugin extends JavaPlugin {
 
     private final Set<String> hardcoreWorlds = new HashSet<>();
-    private final Map<UUID, Set<String>> deadWorlds = new HashMap<>();
-    private final Map<UUID, Set<String>> visitedWorlds = new HashMap<>();
-
+    private HardcoreDataStorage dataStorage;
 
     private File dataFile;
     private FileConfiguration dataConfig;
@@ -28,19 +25,29 @@ public class PerWorldHardcorePlugin extends JavaPlugin {
     @Override
     public void onEnable() {
         saveDefaultConfig();
+
+        dataStorage = new HardcoreDataStorage(this);
+        dataStorage.init();
+
         loadHardcoreWorlds();
-        loadPlayerData();
-
-        // Register events
-        getServer().getPluginManager().registerEvents(new SimpleHardcoreListener(this), this);
-
-        // Register commands
-        Objects.requireNonNull(getCommand("hcpw"))
-                .setExecutor(new HcpwCommand(this));
-
         getLogger().info("PerWorldHardcore enabled. Hardcore worlds: " + hardcoreWorlds);
+
+        getServer().getPluginManager().registerEvents(
+                new HardcorePlayerListener(this),
+                this
+        );
+
+        Objects.requireNonNull(getCommand("pwhc"))
+                .setExecutor(new HcpwCommand(this));
     }
 
+    @Override
+    public void onDisable() {
+        if (dataStorage != null) {
+            dataStorage.shutdown();
+        }
+        getLogger().info("PerWorldHardcore disabled.");
+    }
 
     public void loadHardcoreWorlds() {
         hardcoreWorlds.clear();
@@ -61,156 +68,39 @@ public class PerWorldHardcorePlugin extends JavaPlugin {
         }
     }
 
-    public boolean isHardcoreWorld(String worldName) {
-        return worldName != null && hardcoreWorlds.contains(worldName);
-    }
-
+    // Called by listener / commands
     public boolean isPlayerDeadInWorld(UUID uuid, String worldName) {
-        if (uuid == null || worldName == null) return false;
-        Set<String> worlds = deadWorlds.get(uuid);
-        return worlds != null && worlds.contains(worldName);
+        return dataStorage != null && dataStorage.isPlayerDeadInWorld(uuid, worldName);
     }
 
     public void markPlayerDeadInWorld(UUID uuid, String worldName) {
-        if (uuid == null || worldName == null) return;
-        deadWorlds.computeIfAbsent(uuid, k -> new HashSet<>()).add(worldName);
-        getLogger().info("Marked " + uuid + " as dead in hardcore world '" + worldName + "'.");
-        savePlayerData(); // small plugin; fine to save eagerly
+        if (dataStorage != null) {
+            dataStorage.markPlayerDeadInWorld(uuid, worldName);
+        }
     }
 
     public void markPlayerVisitedWorld(UUID uuid, String worldName) {
-        if (uuid == null || worldName == null) return;
-        visitedWorlds.computeIfAbsent(uuid, k -> new HashSet<>()).add(worldName);
+        if (dataStorage != null) {
+            dataStorage.markPlayerVisitedWorld(uuid, worldName);
+        }
     }
 
     public Set<String> findCullableWorlds() {
-        Set<String> result = new HashSet<>();
-
-        for (String worldName : hardcoreWorlds) {
-            // Don't ever cull hub world, even if it's listed as hardcore
-            if (worldName.equalsIgnoreCase(getHubWorldName())) continue;
-
-            // Build visitor set for this world
-            Set<UUID> visitors = new HashSet<>();
-            for (Map.Entry<UUID, Set<String>> entry : visitedWorlds.entrySet()) {
-                if (entry.getValue().contains(worldName)) {
-                    visitors.add(entry.getKey());
-                }
-            }
-
-            if (visitors.isEmpty()) {
-                // No visits = nothing to cull yet
-                continue;
-            }
-
-            boolean allDead = true;
-            for (UUID uuid : visitors) {
-                if (!isPlayerDeadInWorld(uuid, worldName)) {
-                    allDead = false;
-                    break;
-                }
-            }
-
-            if (allDead) {
-                result.add(worldName);
-            }
-        }
-
-        return result;
+        if (dataStorage == null) return Collections.emptySet();
+        return dataStorage.findCullableWorlds(hardcoreWorlds, getHubWorldName());
     }
 
     public void removeWorldData(String worldName) {
-        // Remove from hardcore list
+        if (dataStorage != null) {
+            dataStorage.removeWorldData(worldName);
+        }
+
+        // Also keep hardcore list + config in sync
         hardcoreWorlds.remove(worldName);
-
-        // Remove from player death/visit maps
-        for (Set<String> worlds : deadWorlds.values()) {
-            worlds.remove(worldName);
-        }
-        for (Set<String> worlds : visitedWorlds.values()) {
-            worlds.remove(worldName);
-        }
-
-        // Also update config hardcore-worlds list
         List<String> current = getConfig().getStringList("hardcore-worlds");
         current.removeIf(w -> w.equalsIgnoreCase(worldName));
         getConfig().set("hardcore-worlds", current);
         saveConfig();
-        savePlayerData();
-    }
-
-    private void setupDataFile() {
-        if (!getDataFolder().exists()) {
-            // plugins/PerWorldHardcore
-            getDataFolder().mkdirs();
-        }
-
-        dataFile = new File(getDataFolder(), "data.yml");
-        if (!dataFile.exists()) {
-            try {
-                dataFile.createNewFile();
-            } catch (IOException e) {
-                getLogger().severe("Could not create data.yml");
-                e.printStackTrace();
-            }
-        }
-
-        dataConfig = YamlConfiguration.loadConfiguration(dataFile);
-    }
-
-    private void loadPlayerData() {
-        deadWorlds.clear();
-        visitedWorlds.clear();
-
-        if (dataConfig == null || !dataConfig.isConfigurationSection("players")) {
-            return;
-        }
-
-        for (String uuidStr : dataConfig.getConfigurationSection("players").getKeys(false)) {
-            try {
-                UUID uuid = UUID.fromString(uuidStr);
-                List<String> dead = dataConfig.getStringList("players." + uuidStr + ".dead-worlds");
-                List<String> visited = dataConfig.getStringList("players." + uuidStr + ".visited-worlds");
-
-                deadWorlds.put(uuid, new HashSet<>(dead));
-                visitedWorlds.put(uuid, new HashSet<>(visited));
-            } catch (IllegalArgumentException ex) {
-                getLogger().warning("Invalid UUID in data.yml: " + uuidStr);
-            }
-        }
-
-        getLogger().info("Loaded dead player data for " + deadWorlds.size() + " players.");
-    }
-
-
-    public void savePlayerData() {
-        if (dataConfig == null) return;
-
-        dataConfig.set("players", null); // clear
-
-        for (Map.Entry<UUID, Set<String>> entry : deadWorlds.entrySet()) {
-            String uuidStr = entry.getKey().toString();
-            dataConfig.set("players." + uuidStr + ".dead-worlds",
-                    new ArrayList<>(entry.getValue()));
-
-            // ALSO save visited worlds
-            Set<String> visited = visitedWorlds.getOrDefault(entry.getKey(), Collections.emptySet());
-            dataConfig.set("players." + uuidStr + ".visited-worlds",
-                    new ArrayList<>(visited));
-        }
-
-        try {
-            dataConfig.save(dataFile);
-        } catch (IOException e) {
-            getLogger().severe("Could not save data.yml");
-            e.printStackTrace();
-        }
-    }
-
-    @Override
-    public void onDisable() {
-        savePlayerData();
-        getLogger().info("PerWorldHardcore disabled.");
     }
 
     public Set<String> getHardcoreWorlds() {
@@ -225,6 +115,10 @@ public class PerWorldHardcorePlugin extends JavaPlugin {
             getConfig().set("hardcore-worlds", current);
             saveConfig();
         }
+    }
+
+    public boolean isHardcoreWorld(String worldName) {
+        return worldName != null && hardcoreWorlds.contains(worldName);
     }
 
     public boolean isAllowSpectatorOnDeath() {

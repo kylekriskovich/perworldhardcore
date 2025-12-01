@@ -12,11 +12,11 @@ import org.bukkit.event.player.PlayerRespawnEvent;
 import org.bukkit.event.player.PlayerTeleportEvent;
 import org.bukkit.GameMode;
 
-public class SimpleHardcoreListener implements Listener {
+public class HardcorePlayerListener implements Listener {
 
     private final PerWorldHardcorePlugin plugin;
 
-    public SimpleHardcoreListener(PerWorldHardcorePlugin plugin) {
+    public HardcorePlayerListener(PerWorldHardcorePlugin plugin) {
         this.plugin = plugin;
     }
 
