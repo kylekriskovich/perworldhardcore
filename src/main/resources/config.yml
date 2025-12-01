@@ -1,4 +1,15 @@
 hardcore-worlds:
-  - world
+  - hc-test-01
 
-hub-world: hubworld
+hub-world: world
+
+# If true: death in hardcore world => spectator in that world
+# If false: death in hardcore world => sent to hub-world in survival
+allow-spectator-on-death: true
+
+# If true: players can still TP back into a hardcore world they died in
+# If false: TP into that world is intercepted; they are sent to hub-world instead
+allow-tp-after-death: false
+
+# Hard limit on how many hardcore worlds should be open at once
+max-open-hardcore-worlds: 3

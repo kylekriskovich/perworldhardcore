@@ -4,3 +4,20 @@ version: 1.0.0
 api-version: 1.21
 author: KyleKriskovich
 description: Simple per-world hardcore test plugin
+website: https://github.com/KyleKriskovich/PerWorldHardcore
+
+depend:
+  - Multiverse-Core
+
+softdepend:
+  - Multiverse-NetherPortals
+
+commands:
+  hcpw:
+    description: Per-world hardcore admin commands
+    usage: /hcpw <reload|status|cull|create>
+    permission: hcpw.admin
+
+permissions:
+  hcpw.admin:
+    default: op
