@@ -13,11 +13,11 @@ softdepend:
   - Multiverse-NetherPortals
 
 commands:
-  hcpw:
+  hardcore:
     description: Per-world hardcore admin commands
-    usage: /hcpw <reload|status|cull|create>
-    permission: hcpw.admin
+    usage: /hardcore <reload|status|cull|create>
+    permission: hardcore.admin
 
 permissions:
-  hcpw.admin:
+  hardcore.admin:
     default: op

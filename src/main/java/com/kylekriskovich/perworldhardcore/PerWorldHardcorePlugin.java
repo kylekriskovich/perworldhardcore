@@ -1,26 +1,20 @@
 package com.kylekriskovich.perworldhardcore;
 
 import com.kylekriskovich.perworldhardcore.listener.HardcorePlayerListener;
-import com.kylekriskovich.perworldhardcore.command.HcpwCommand;
+import com.kylekriskovich.perworldhardcore.command.HardcoreCommands;
 import com.kylekriskovich.perworldhardcore.storage.HardcoreDataStorage;
+
 import org.bukkit.Bukkit;
 import org.bukkit.plugin.java.JavaPlugin;
-import org.bukkit.configuration.file.FileConfiguration;
 import org.bukkit.World;
 
 import java.util.*;
 import java.util.Objects;
 
-import java.io.File;
-
-
 public class PerWorldHardcorePlugin extends JavaPlugin {
 
     private final Set<String> hardcoreWorlds = new HashSet<>();
     private HardcoreDataStorage dataStorage;
-
-    private File dataFile;
-    private FileConfiguration dataConfig;
 
     @Override
     public void onEnable() {
@@ -37,8 +31,8 @@ public class PerWorldHardcorePlugin extends JavaPlugin {
                 this
         );
 
-        Objects.requireNonNull(getCommand("hcpw"))
-                .setExecutor(new HcpwCommand(this));
+        Objects.requireNonNull(getCommand("hardcore"))
+                .setExecutor(new HardcoreCommands(this));
     }
 
     @Override
@@ -54,7 +48,7 @@ public class PerWorldHardcorePlugin extends JavaPlugin {
         List<String> worldsFromConfig = getConfig().getStringList("hardcore-worlds");
         getLogger().info("Config hardcore-worlds raw: " + worldsFromConfig);
 
-        if (worldsFromConfig == null || worldsFromConfig.isEmpty()) {
+        if (worldsFromConfig.isEmpty()) {
             // Fallback so you're never stuck with an empty set while testing
             //hardcoreWorlds.add("world");
             getLogger().warning("No hardcore-worlds defined in config.yml");
@@ -95,7 +89,7 @@ public class PerWorldHardcorePlugin extends JavaPlugin {
             dataStorage.removeWorldData(worldName);
         }
 
-        // Also keep hardcore list + config in sync
+        // Also keep the hardcore list and config in sync
         hardcoreWorlds.remove(worldName);
         List<String> current = getConfig().getStringList("hardcore-worlds");
         current.removeIf(w -> w.equalsIgnoreCase(worldName));

@@ -10,30 +10,30 @@ import org.bukkit.plugin.Plugin;
 
 import java.util.Set;
 
-public class HcpwCommand implements CommandExecutor {
+public class HardcoreCommands implements CommandExecutor {
 
     private final PerWorldHardcorePlugin plugin;
 
-    public HcpwCommand(PerWorldHardcorePlugin plugin) {
+    public HardcoreCommands(PerWorldHardcorePlugin plugin) {
         this.plugin = plugin;
 
         // Optional sanity check – since plugin.yml has depend: [Multiverse-Core],
         // this *should* always exist, but we’ll log if not.
         Plugin mv = Bukkit.getPluginManager().getPlugin("Multiverse-Core");
         if (mv == null || !mv.isEnabled()) {
-            plugin.getLogger().severe("Multiverse-Core not found or not enabled! HCPW commands will be limited.");
+            plugin.getLogger().severe("Multiverse-Core not found or not enabled! hardcore commands will be limited.");
         }
     }
 
     @Override
     public boolean onCommand(CommandSender sender, Command command, String label, String[] args) {
-        if (!sender.hasPermission("hcpw.admin")) {
+        if (!sender.hasPermission("hardcore.admin")) {
             sender.sendMessage("No permission.");
             return true;
         }
 
         if (args.length == 0) {
-            sender.sendMessage("/hcpw reload | status <world> | cull [delete] | create <name>");
+            sender.sendMessage("/hardcore reload | status <world> | cull [delete] | create <name>");
             return true;
         }
 
@@ -46,7 +46,7 @@ public class HcpwCommand implements CommandExecutor {
 
             case "status":
                 if (args.length < 2) {
-                    sender.sendMessage("Usage: /hcpw status <world>");
+                    sender.sendMessage("Usage: /hardcore status <world>");
                     return true;
                 }
                 statusWorld(sender, args[1]);
@@ -59,14 +59,14 @@ public class HcpwCommand implements CommandExecutor {
 
             case "create":
                 if (args.length < 2) {
-                    sender.sendMessage("Usage: /hcpw create <worldName>");
+                    sender.sendMessage("Usage: /hardcore create <worldName>");
                     return true;
                 }
                 createHardcoreWorld(sender, args[1]);
                 return true;
 
             default:
-                sender.sendMessage("/hcpw reload | status <world> | cull [delete] | create <name>");
+                sender.sendMessage("/hardcore reload | status <world> | cull [delete] | create <name>");
                 return true;
         }
     }
@@ -92,7 +92,7 @@ public class HcpwCommand implements CommandExecutor {
         sender.sendMessage("Cullable hardcore worlds: " + String.join(", ", candidates));
 
         if (!delete) {
-            sender.sendMessage("Run /hcpw cull delete to actually delete them via Multiverse.");
+            sender.sendMessage("Run /hardcore cull delete to actually delete them via Multiverse.");
             return;
         }
 
