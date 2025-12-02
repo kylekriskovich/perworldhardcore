@@ -1,6 +1,7 @@
 package com.kylekriskovich.perworldhardcore.command;
 
 import com.kylekriskovich.perworldhardcore.PerWorldHardcorePlugin;
+
 import org.bukkit.Bukkit;
 import org.bukkit.World;
 import org.bukkit.command.Command;
@@ -9,6 +10,8 @@ import org.bukkit.command.CommandSender;
 import org.bukkit.plugin.Plugin;
 
 import java.util.Set;
+
+import org.jetbrains.annotations.NotNull;
 
 public class HardcoreCommands implements CommandExecutor {
 
@@ -26,7 +29,7 @@ public class HardcoreCommands implements CommandExecutor {
     }
 
     @Override
-    public boolean onCommand(CommandSender sender, Command command, String label, String[] args) {
+    public boolean onCommand(@NotNull CommandSender sender, @NotNull Command command, @NotNull String label, @NotNull String[] args) {
         if (!sender.hasPermission("hardcore.admin")) {
             sender.sendMessage("No permission.");
             return true;
