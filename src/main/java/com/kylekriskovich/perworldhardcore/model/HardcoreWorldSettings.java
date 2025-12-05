@@ -35,6 +35,7 @@ public class HardcoreWorldSettings {
                         : defaultTp;
     }
 
+    @SuppressWarnings( "unused")
     public String getWorldName() {
         return worldName;
     }
@@ -43,6 +44,7 @@ public class HardcoreWorldSettings {
         return allowSpectatorOnDeath;
     }
 
+    @SuppressWarnings( "unused")
     public boolean isAllowTpAfterDeath() {
         return allowTpAfterDeath;
     }

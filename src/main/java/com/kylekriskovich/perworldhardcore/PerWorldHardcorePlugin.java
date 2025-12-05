@@ -209,6 +209,7 @@ public class PerWorldHardcorePlugin extends JavaPlugin {
     // Accessors used by listeners / commands
     // ------------------------------------------------------------------------
 
+    @SuppressWarnings( "unused")
     public MessageManager getMessageManager() {
         return messageManager;
     }

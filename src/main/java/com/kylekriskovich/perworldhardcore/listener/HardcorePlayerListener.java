@@ -58,28 +58,25 @@ public class HardcorePlayerListener implements Listener {
             return;
         }
 
-        if (!plugin.hasDiedInWorld(playerId, deathWorld.getName())) {
-            // No record that they died in this world
-            return;
-        }
+        if (plugin.hasDiedInWorld(playerId, deathWorld.getName())) {
+            World hub = plugin.getHubWorld();
+            if (hub == null) {
+                plugin.getLogger().warning("Hub world not found; cannot redirect respawn.");
+                return;
+            }
 
-        World hub = plugin.getHubWorld();
-        if (hub == null) {
-            plugin.getLogger().warning("Hub world not found; cannot redirect respawn.");
-            return;
-        }
-
-        if (settings.isAllowSpectatorOnDeath()) {
-            // Stay in hardcore world, become spectator
-            plugin.getServer().getScheduler().runTask(plugin, () -> {
-                player.setGameMode(GameMode.SPECTATOR);
-            });
-        } else {
-            // Respawn in hub as survival
-            event.setRespawnLocation(hub.getSpawnLocation());
-            plugin.getServer().getScheduler().runTask(plugin, () -> {
-                player.setGameMode(GameMode.SURVIVAL);
-            });
+            if (settings.isAllowSpectatorOnDeath()) {
+                // Stay in hardcore world, become spectator
+                plugin.getServer().getScheduler().runTask(plugin, () -> {
+                    player.setGameMode(GameMode.SPECTATOR);
+                });
+            } else {
+                // Respawn in hub as survival
+                event.setRespawnLocation(hub.getSpawnLocation());
+                plugin.getServer().getScheduler().runTask(plugin, () -> {
+                    player.setGameMode(GameMode.SURVIVAL);
+                });
+            }
         }
     }
 
@@ -97,28 +94,25 @@ public class HardcorePlayerListener implements Listener {
             return;
         }
 
-        if (!plugin.hasDiedInWorld(playerId, joinWorldName)) {
-            // They haven't died in this hardcore world
-            return;
-        }
+        if (plugin.hasDiedInWorld(playerId, joinWorldName)) {
+            World hub = plugin.getHubWorld();
+            if (hub == null) {
+                plugin.getLogger().warning("Hub world not found; cannot redirect join.");
+                return;
+            }
 
-        World hub = plugin.getHubWorld();
-        if (hub == null) {
-            plugin.getLogger().warning("Hub world not found; cannot redirect join.");
-            return;
-        }
-
-        if (settings.isAllowSpectatorOnDeath()) {
-            // Let them stay in the hardcore world but as spectator
-            plugin.getServer().getScheduler().runTask(plugin, () -> {
-                player.setGameMode(GameMode.SPECTATOR);
-            });
-        } else {
-            // Kick them to hub as survival
-            plugin.getServer().getScheduler().runTask(plugin, () -> {
-                player.teleport(hub.getSpawnLocation());
-                player.setGameMode(GameMode.SURVIVAL);
-            });
+            if (settings.isAllowSpectatorOnDeath()) {
+                // Let them stay in the hardcore world but as spectator
+                plugin.getServer().getScheduler().runTask(plugin, () -> {
+                    player.setGameMode(GameMode.SPECTATOR);
+                });
+            } else {
+                // Kick them to hub as survival
+                plugin.getServer().getScheduler().runTask(plugin, () -> {
+                    player.teleport(hub.getSpawnLocation());
+                    player.setGameMode(GameMode.SURVIVAL);
+                });
+            }
         }
     }
 }

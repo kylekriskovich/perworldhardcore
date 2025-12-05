@@ -10,6 +10,7 @@ import java.io.InputStreamReader;
 import java.nio.charset.StandardCharsets;
 import java.util.Map;
 import java.util.Properties;
+import java.util.logging.Level;
 
 public class MessageManager {
 
@@ -26,19 +27,20 @@ public class MessageManager {
                 plugin.getLogger().warning("Could not find " + fileName + " in jar resources.");
             }
         } catch (IOException e) {
-            plugin.getLogger().severe("Failed to load messages: " + e.getMessage());
-            e.printStackTrace();
+            plugin.getLogger().log(Level.SEVERE, "Failed to load messages file", e);
         }
 
         String prefixRaw = messages.getProperty("prefix", "");
         this.prefix = color(prefixRaw);
     }
 
+    @SuppressWarnings("unused")
     public String get(String key) {
         String raw = messages.getProperty(key, key);
         return prefix + color(raw);
     }
 
+    @SuppressWarnings("unused")
     public String get(String key, Map<String, String> placeholders) {
         String raw = messages.getProperty(key, key);
         String result = raw;

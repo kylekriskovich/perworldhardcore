@@ -15,6 +15,7 @@ public class PlayerWorldState {
         this.playerId = playerId;
     }
 
+    @SuppressWarnings( "unused")
     public UUID getPlayerId() {
         return playerId;
     }
