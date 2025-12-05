@@ -6,6 +6,7 @@ import java.util.HashMap;
 import java.util.Map;
 import java.util.UUID;
 
+@SuppressWarnings("unused")
 public class PlayerWorldStateStore {
 
     private final Map<UUID, PlayerWorldState> states = new HashMap<>();

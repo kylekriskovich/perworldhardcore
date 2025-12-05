@@ -42,8 +42,7 @@ public class MessageManager {
 
     @SuppressWarnings("unused")
     public String get(String key, Map<String, String> placeholders) {
-        String raw = messages.getProperty(key, key);
-        String result = raw;
+        String result = messages.getProperty(key, key);
         if (placeholders != null) {
             for (Map.Entry<String, String> entry : placeholders.entrySet()) {
                 result = result.replace("{" + entry.getKey() + "}", entry.getValue());

@@ -67,15 +67,11 @@ public class HardcorePlayerListener implements Listener {
 
             if (settings.isAllowSpectatorOnDeath()) {
                 // Stay in hardcore world, become spectator
-                plugin.getServer().getScheduler().runTask(plugin, () -> {
-                    player.setGameMode(GameMode.SPECTATOR);
-                });
+                plugin.getServer().getScheduler().runTask(plugin, () -> player.setGameMode(GameMode.SPECTATOR));
             } else {
                 // Respawn in hub as survival
                 event.setRespawnLocation(hub.getSpawnLocation());
-                plugin.getServer().getScheduler().runTask(plugin, () -> {
-                    player.setGameMode(GameMode.SURVIVAL);
-                });
+                plugin.getServer().getScheduler().runTask(plugin, () -> player.setGameMode(GameMode.SURVIVAL));
             }
         }
     }
@@ -103,9 +99,7 @@ public class HardcorePlayerListener implements Listener {
 
             if (settings.isAllowSpectatorOnDeath()) {
                 // Let them stay in the hardcore world but as spectator
-                plugin.getServer().getScheduler().runTask(plugin, () -> {
-                    player.setGameMode(GameMode.SPECTATOR);
-                });
+                plugin.getServer().getScheduler().runTask(plugin, () -> player.setGameMode(GameMode.SPECTATOR));
             } else {
                 // Kick them to hub as survival
                 plugin.getServer().getScheduler().runTask(plugin, () -> {
