@@ -51,6 +51,7 @@ public class MessageManager {
         return prefix + color(result);
     }
 
+    @SuppressWarnings("deprecation")
     private String color(String input) {
         return ChatColor.translateAlternateColorCodes('&', input);
     }
