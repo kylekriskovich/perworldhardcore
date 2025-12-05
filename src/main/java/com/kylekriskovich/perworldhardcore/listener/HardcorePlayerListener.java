@@ -2,8 +2,6 @@ package com.kylekriskovich.perworldhardcore.listener;
 
 import com.kylekriskovich.perworldhardcore.PerWorldHardcorePlugin;
 import com.kylekriskovich.perworldhardcore.model.HardcoreWorldSettings;
-import com.kylekriskovich.perworldhardcore.model.PlayerWorldState;
-import com.kylekriskovich.perworldhardcore.storage.PlayerWorldStateStore;
 import org.bukkit.GameMode;
 import org.bukkit.World;
 import org.bukkit.entity.Player;
@@ -18,15 +16,14 @@ import java.util.UUID;
 public class HardcorePlayerListener implements Listener {
 
     private final PerWorldHardcorePlugin plugin;
-    private final HardcoreWorldSettings hardcoreWorldSettings;
-    private final PlayerWorldStateStore stateStore;
 
-    public HardcorePlayerListener(PerWorldHardcorePlugin plugin,
-                                  HardcoreWorldSettings hardcoreWorldSettings,
-                                  PlayerWorldStateStore stateStore) {
+    public HardcorePlayerListener(PerWorldHardcorePlugin plugin) {
         this.plugin = plugin;
-        this.hardcoreWorldSettings = hardcoreWorldSettings;
-        this.stateStore = stateStore;
+    }
+
+    private HardcoreWorldSettings getSettings(World world) {
+        if (world == null) return null;
+        return plugin.getHardcoreWorldSettings(world.getName());
     }
 
     // 1) Mark them dead in that hardcore world
@@ -36,12 +33,16 @@ public class HardcorePlayerListener implements Listener {
         World world = player.getWorld();
         String worldName = world.getName();
 
-        if (!hardcoreWorldSettings.isHardcoreWorld(worldName)) {
+        HardcoreWorldSettings settings = getSettings(world);
+        if (settings == null) {
+            // Not a configured hardcore world
             return;
         }
 
-        PlayerWorldState state = stateStore.getOrCreate(player.getUniqueId());
-        state.markDeadIn(worldName);
+        // Persist "dead in this world" via HardcoreDataStorage
+        plugin.markPlayerDeadInWorld(player.getUniqueId(), worldName);
+        // Also track they’ve visited it (helps culling)
+        plugin.markPlayerVisitedWorld(player.getUniqueId(), worldName);
     }
 
     // 2) On respawn, send them to hub / spectator if they died in that world
@@ -49,57 +50,75 @@ public class HardcorePlayerListener implements Listener {
     public void onPlayerRespawn(PlayerRespawnEvent event) {
         Player player = event.getPlayer();
         UUID playerId = player.getUniqueId();
-        PlayerWorldState state = stateStore.get(playerId);
+        World deathWorld = player.getWorld(); // world they died in
 
-        if (state == null) {
+        HardcoreWorldSettings settings = getSettings(deathWorld);
+        if (settings == null) {
+            // Not a hardcore world
             return;
         }
 
-        String deathWorldName = player.getWorld().getName();
-        if (!state.isDeadIn(deathWorldName)) {
+        if (!plugin.hasDiedInWorld(playerId, deathWorld.getName())) {
+            // No record that they died in this world
             return;
         }
 
-        World hub = plugin.getServer().getWorld(hardcoreWorldSettings.getHubWorldName());
+        World hub = plugin.getHubWorld();
         if (hub == null) {
             plugin.getLogger().warning("Hub world not found; cannot redirect respawn.");
             return;
         }
 
-        event.setRespawnLocation(hub.getSpawnLocation());
-
-        // Respect your config flags here if you have them
-        plugin.getServer().getScheduler().runTask(plugin, () -> {
-            player.setGameMode(GameMode.SPECTATOR); // or SURVIVAL if “teleport to hub” only
-        });
+        if (settings.isAllowSpectatorOnDeath()) {
+            // Stay in hardcore world, become spectator
+            plugin.getServer().getScheduler().runTask(plugin, () -> {
+                player.setGameMode(GameMode.SPECTATOR);
+            });
+        } else {
+            // Respawn in hub as survival
+            event.setRespawnLocation(hub.getSpawnLocation());
+            plugin.getServer().getScheduler().runTask(plugin, () -> {
+                player.setGameMode(GameMode.SURVIVAL);
+            });
+        }
     }
 
-    // 3) On join (after logout on death), force them out of hardcore world
+    // 3) On join (after logout on death), apply same rules as respawn
     @EventHandler
     public void onPlayerJoin(PlayerJoinEvent event) {
         Player player = event.getPlayer();
         UUID playerId = player.getUniqueId();
-        PlayerWorldState state = stateStore.get(playerId);
+        World joinWorld = player.getWorld();
+        String joinWorldName = joinWorld.getName();
 
-        if (state == null) {
+        HardcoreWorldSettings settings = getSettings(joinWorld);
+        if (settings == null) {
+            // Not a hardcore world
             return;
         }
 
-        String joinWorldName = player.getWorld().getName();
-        if (!state.isDeadIn(joinWorldName)) {
-            // they might join the hub directly, that’s fine
+        if (!plugin.hasDiedInWorld(playerId, joinWorldName)) {
+            // They haven't died in this hardcore world
             return;
         }
 
-        World hub = plugin.getServer().getWorld(hardcoreWorldSettings.getHubWorldName());
+        World hub = plugin.getHubWorld();
         if (hub == null) {
             plugin.getLogger().warning("Hub world not found; cannot redirect join.");
             return;
         }
 
-        plugin.getServer().getScheduler().runTask(plugin, () -> {
-            player.teleport(hub.getSpawnLocation());
-            player.setGameMode(GameMode.SPECTATOR); // or hub mode
-        });
+        if (settings.isAllowSpectatorOnDeath()) {
+            // Let them stay in the hardcore world but as spectator
+            plugin.getServer().getScheduler().runTask(plugin, () -> {
+                player.setGameMode(GameMode.SPECTATOR);
+            });
+        } else {
+            // Kick them to hub as survival
+            plugin.getServer().getScheduler().runTask(plugin, () -> {
+                player.teleport(hub.getSpawnLocation());
+                player.setGameMode(GameMode.SURVIVAL);
+            });
+        }
     }
 }

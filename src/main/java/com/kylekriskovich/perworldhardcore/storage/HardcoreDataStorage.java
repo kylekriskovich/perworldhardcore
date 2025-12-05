@@ -2,12 +2,14 @@ package com.kylekriskovich.perworldhardcore.storage;
 
 import com.kylekriskovich.perworldhardcore.PerWorldHardcorePlugin;
 import com.kylekriskovich.perworldhardcore.model.PlayerWorldState;
+import org.bukkit.configuration.ConfigurationSection;
 import org.bukkit.configuration.file.FileConfiguration;
 import org.bukkit.configuration.file.YamlConfiguration;
 
 import java.io.File;
 import java.io.IOException;
 import java.util.*;
+import java.util.logging.Level;
 
 public class HardcoreDataStorage {
 
@@ -16,7 +18,7 @@ public class HardcoreDataStorage {
     private File dataFile;
     private FileConfiguration dataConfig;
 
-    // All per-player state lives here now
+    // All per-player state lives here
     private final Map<UUID, PlayerWorldState> players = new HashMap<>();
 
     public HardcoreDataStorage(PerWorldHardcorePlugin plugin) {
@@ -113,17 +115,12 @@ public class HardcoreDataStorage {
      * Does NOT touch the hardcore-worlds config list – plugin handles that.
      */
     public void removeWorldData(String worldName) {
+        if (worldName == null) return;
+
         for (PlayerWorldState state : players.values()) {
-            // Assuming your model exposes these as mutable sets or has remove methods;
-            // adjust if you implemented it differently.
-            state.getDeadWorlds().remove(worldName);
-            state.getVisitedWorlds().remove(worldName);
+            state.removeWorld(worldName);
         }
         savePlayerData();
-    }
-
-    public Map<UUID, PlayerWorldState> getPlayers() {
-        return Collections.unmodifiableMap(players);
     }
 
     // -----------------------------------------------------------------------
@@ -132,16 +129,22 @@ public class HardcoreDataStorage {
 
     private void setupDataFile() {
         if (!plugin.getDataFolder().exists()) {
-            plugin.getDataFolder().mkdirs();
+            boolean createdDir = plugin.getDataFolder().mkdirs();
+            if (!createdDir) {
+                plugin.getLogger().warning("Could not create plugin data folder: "
+                        + plugin.getDataFolder().getAbsolutePath());
+            }
         }
 
         dataFile = new File(plugin.getDataFolder(), "data.yml");
         if (!dataFile.exists()) {
             try {
-                dataFile.createNewFile();
+                boolean createdFile = dataFile.createNewFile();
+                if (!createdFile) {
+                    plugin.getLogger().warning("data.yml file already existed or could not be created.");
+                }
             } catch (IOException e) {
-                plugin.getLogger().severe("Could not create data.yml");
-                e.printStackTrace();
+                plugin.getLogger().log(Level.SEVERE, "Could not create data.yml", e);
             }
         }
 
@@ -151,11 +154,16 @@ public class HardcoreDataStorage {
     private void loadPlayerData() {
         players.clear();
 
-        if (dataConfig == null || !dataConfig.isConfigurationSection("players")) {
+        if (dataConfig == null) {
             return;
         }
 
-        for (String uuidStr : dataConfig.getConfigurationSection("players").getKeys(false)) {
+        ConfigurationSection playersSection = dataConfig.getConfigurationSection("players");
+        if (playersSection == null) {
+            return;
+        }
+
+        for (String uuidStr : playersSection.getKeys(false)) {
             try {
                 UUID uuid = UUID.fromString(uuidStr);
                 PlayerWorldState state = new PlayerWorldState(uuid);
@@ -176,11 +184,11 @@ public class HardcoreDataStorage {
             }
         }
 
-        plugin.getLogger().info("Loaded dead player data for " + players.size() + " players.");
+        plugin.getLogger().info("Loaded dead/visited data for " + players.size() + " players.");
     }
 
     private void savePlayerData() {
-        if (dataConfig == null) return;
+        if (dataConfig == null || dataFile == null) return;
 
         dataConfig.set("players", null); // clear section
 
@@ -197,8 +205,7 @@ public class HardcoreDataStorage {
         try {
             dataConfig.save(dataFile);
         } catch (IOException e) {
-            plugin.getLogger().severe("Could not save data.yml");
-            e.printStackTrace();
+            plugin.getLogger().log(Level.SEVERE, "Could not save data.yml", e);
         }
     }
 }

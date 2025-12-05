@@ -51,7 +51,11 @@ public class PlayerWorldState {
         return Collections.unmodifiableSet(visitedWorlds);
     }
 
-    public boolean isDeadAnywhere() {
-        return !deadWorlds.isEmpty();
+    // --- Helpers for cleanup ------------------------------------------------
+
+    public void removeWorld(String worldName) {
+        if (worldName == null) return;
+        deadWorlds.remove(worldName);
+        visitedWorlds.remove(worldName);
     }
 }
