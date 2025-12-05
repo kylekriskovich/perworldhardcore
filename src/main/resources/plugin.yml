@@ -8,9 +8,10 @@ website: https://github.com/KyleKriskovich/PerWorldHardcore
 
 depend:
   - Multiverse-Core
+  - Multiverse-NetherPortals
 
 softdepend:
-  - Multiverse-NetherPortals
+  - Multiverse-Inventories
 
 commands:
   hardcore:

@@ -1,127 +1,105 @@
 package com.kylekriskovich.perworldhardcore.listener;
 
 import com.kylekriskovich.perworldhardcore.PerWorldHardcorePlugin;
-import org.bukkit.Bukkit;
+import com.kylekriskovich.perworldhardcore.model.HardcoreWorldSettings;
+import com.kylekriskovich.perworldhardcore.model.PlayerWorldState;
+import com.kylekriskovich.perworldhardcore.storage.PlayerWorldStateStore;
+import org.bukkit.GameMode;
 import org.bukkit.World;
 import org.bukkit.entity.Player;
 import org.bukkit.event.EventHandler;
-import org.bukkit.event.EventPriority;
 import org.bukkit.event.Listener;
 import org.bukkit.event.entity.PlayerDeathEvent;
+import org.bukkit.event.player.PlayerJoinEvent;
 import org.bukkit.event.player.PlayerRespawnEvent;
-import org.bukkit.event.player.PlayerTeleportEvent;
-import org.bukkit.GameMode;
+
+import java.util.UUID;
 
 public class HardcorePlayerListener implements Listener {
 
     private final PerWorldHardcorePlugin plugin;
+    private final HardcoreWorldSettings hardcoreWorldSettings;
+    private final PlayerWorldStateStore stateStore;
 
-    public HardcorePlayerListener(PerWorldHardcorePlugin plugin) {
+    public HardcorePlayerListener(PerWorldHardcorePlugin plugin,
+                                  HardcoreWorldSettings hardcoreWorldSettings,
+                                  PlayerWorldStateStore stateStore) {
         this.plugin = plugin;
+        this.hardcoreWorldSettings = hardcoreWorldSettings;
+        this.stateStore = stateStore;
     }
 
-    private boolean isHardcoreWorld(World world) {
-        world.isHardcore();
-        return world != null && plugin.isHardcoreWorld(world.getName());
-    }
-
-    @EventHandler(priority = EventPriority.MONITOR)
+    // 1) Mark them dead in that hardcore world
+    @EventHandler
     public void onPlayerDeath(PlayerDeathEvent event) {
         Player player = event.getEntity();
         World world = player.getWorld();
+        String worldName = world.getName();
 
-        if (!isHardcoreWorld(world)) {
+        if (!hardcoreWorldSettings.isHardcoreWorld(worldName)) {
             return;
         }
 
-        // Mark player as dead in THIS hardcore world
-        plugin.markPlayerDeadInWorld(player.getUniqueId(), world.getName());
-
-        plugin.getLogger().info(player.getName() + " died in hardcore world '" + world.getName() + "'.");
-        event.setDeathMessage("[HardcoreTest] " + player.getName() + " lost their life in " + world.getName());
+        PlayerWorldState state = stateStore.getOrCreate(player.getUniqueId());
+        state.markDeadIn(worldName);
     }
 
-    @EventHandler(priority = EventPriority.HIGHEST)
+    // 2) On respawn, send them to hub / spectator if they died in that world
+    @EventHandler
     public void onPlayerRespawn(PlayerRespawnEvent event) {
         Player player = event.getPlayer();
-        World deathWorld = player.getWorld();
+        UUID playerId = player.getUniqueId();
+        PlayerWorldState state = stateStore.get(playerId);
 
-        if (!isHardcoreWorld(deathWorld)) {
+        if (state == null) {
             return;
         }
 
-        if (plugin.isAllowSpectatorOnDeath()) {
-            // stay in current world, become spectator
-            Bukkit.getScheduler().runTask(plugin, () -> {
-                player.setGameMode(GameMode.SPECTATOR);
-                player.sendMessage("You died in hardcore world '" + deathWorld.getName() + "'. You are now in spectator mode.");
-            });
-        } else {
-            // Send to hub-world as survival
-            World hub = plugin.getHubWorld();
-            if (hub != null) {
-                event.setRespawnLocation(hub.getSpawnLocation());
-                Bukkit.getScheduler().runTask(plugin, () -> {
-                    player.setGameMode(GameMode.SURVIVAL);
-                    player.sendMessage("You died in hardcore world '" + deathWorld.getName()
-                            + "'. Returning you to hub '" + hub.getName() + "'.");
-                });
-            }
+        String deathWorldName = player.getWorld().getName();
+        if (!state.isDeadIn(deathWorldName)) {
+            return;
         }
+
+        World hub = plugin.getServer().getWorld(hardcoreWorldSettings.getHubWorldName());
+        if (hub == null) {
+            plugin.getLogger().warning("Hub world not found; cannot redirect respawn.");
+            return;
+        }
+
+        event.setRespawnLocation(hub.getSpawnLocation());
+
+        // Respect your config flags here if you have them
+        plugin.getServer().getScheduler().runTask(plugin, () -> {
+            player.setGameMode(GameMode.SPECTATOR); // or SURVIVAL if “teleport to hub” only
+        });
     }
 
-    @EventHandler(priority = EventPriority.HIGHEST, ignoreCancelled = true)
-    public void onPlayerTeleport(PlayerTeleportEvent event) {
+    // 3) On join (after logout on death), force them out of hardcore world
+    @EventHandler
+    public void onPlayerJoin(PlayerJoinEvent event) {
         Player player = event.getPlayer();
-        if (event.getTo() == null || event.getFrom() == null) return;
+        UUID playerId = player.getUniqueId();
+        PlayerWorldState state = stateStore.get(playerId);
 
-        World fromWorld = event.getFrom().getWorld();
-        World targetWorld = event.getTo().getWorld();
-        if (fromWorld == null || targetWorld == null) return;
-
-        String targetName = targetWorld.getName();
-
-        if (plugin.isHardcoreWorld(targetName)) {
-            plugin.markPlayerVisitedWorld(player.getUniqueId(), targetName);
-        }
-
-        // Not a hardcore world? We don't care.
-        if (!plugin.isHardcoreWorld(targetName)) {
+        if (state == null) {
             return;
         }
 
-        // Only care about cross-world teleports (spectator zipping around same world is fine)
-        boolean isWorldChange = !fromWorld.getName().equals(targetName);
-        if (!isWorldChange) {
+        String joinWorldName = player.getWorld().getName();
+        if (!state.isDeadIn(joinWorldName)) {
+            // they might join the hub directly, that’s fine
             return;
         }
 
-        // If they haven't died in this world, TP is fine.
-        if (!plugin.isPlayerDeadInWorld(player.getUniqueId(), targetName)) {
+        World hub = plugin.getServer().getWorld(hardcoreWorldSettings.getHubWorldName());
+        if (hub == null) {
+            plugin.getLogger().warning("Hub world not found; cannot redirect join.");
             return;
         }
 
-        // They DID die in this hardcore world.
-        if (plugin.isAllowTpAfterDeath()) {
-            // Config says we allow it – maybe they're a ghost spectator, so do nothing.
-            return;
-        }
-
-        // Config says: NO TP after death → send to hub.
-        World hub = plugin.getHubWorld();
-        event.setCancelled(true);
-
-        if (hub != null && !hub.getName().equals(targetName)) {
-            Bukkit.getScheduler().runTask(plugin, () -> {
-                player.teleport(hub.getSpawnLocation());
-                player.sendMessage("You already died in hardcore world '" + targetName
-                        + "'. Sending you to hub '" + hub.getName() + "'.");
-            });
-        } else {
-            player.sendMessage("You already died in hardcore world '" + targetName + "' and cannot return.");
-        }
+        plugin.getServer().getScheduler().runTask(plugin, () -> {
+            player.teleport(hub.getSpawnLocation());
+            player.setGameMode(GameMode.SPECTATOR); // or hub mode
+        });
     }
-
-
 }
-

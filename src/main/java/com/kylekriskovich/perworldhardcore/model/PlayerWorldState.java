@@ -50,4 +50,8 @@ public class PlayerWorldState {
     public Set<String> getVisitedWorlds() {
         return Collections.unmodifiableSet(visitedWorlds);
     }
+
+    public boolean isDeadAnywhere() {
+        return !deadWorlds.isEmpty();
+    }
 }

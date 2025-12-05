@@ -24,12 +24,16 @@ public class HardcoreCommands implements CommandExecutor {
         // this *should* always exist, but we’ll log if not.
         Plugin mv = Bukkit.getPluginManager().getPlugin("Multiverse-Core");
         if (mv == null || !mv.isEnabled()) {
-            plugin.getLogger().severe("Multiverse-Core not found or not enabled! hardcore commands will be limited.");
+            plugin.getLogger().severe("Multiverse-Core Dependency not found or not enabled!");
         }
     }
 
     @Override
-    public boolean onCommand(@NotNull CommandSender sender, @NotNull Command command, @NotNull String label, @NotNull String[] args) {
+    public boolean onCommand(@NotNull CommandSender sender,
+                             @NotNull Command command,
+                             @NotNull String label,
+                             @NotNull String[] args)
+    {
         if (!sender.hasPermission("hardcore.admin")) {
             sender.sendMessage("No permission.");
             return true;
