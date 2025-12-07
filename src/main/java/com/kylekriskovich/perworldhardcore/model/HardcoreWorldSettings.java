@@ -14,26 +14,40 @@ public class HardcoreWorldSettings {
                                  FileConfiguration config) {
         this.worldName = worldName;
 
-        ConfigurationSection defaults = config.getConfigurationSection("defaults_Settings");
+        ConfigurationSection defaults =
+                config.getConfigurationSection("defaults_settings");
+        if (defaults == null) {
+            defaults = config.getConfigurationSection("defaults_Settings");
+        }
+
         boolean defaultSpectator =
                 defaults != null && defaults.getBoolean("allow-spectator-on-death", true);
         boolean defaultTp =
                 defaults != null && defaults.getBoolean("allow-tp-after-death", false);
 
-        ConfigurationSection worlds = config.getConfigurationSection("hardcore-worlds");
-        ConfigurationSection worldSection =
-                worlds != null ? worlds.getConfigurationSection(worldName) : null;
+        ConfigurationSection groups = config.getConfigurationSection("hardcore-worlds");
+        ConfigurationSection groupSection =
+                groups != null ? groups.getConfigurationSection(worldName) : null;
+
+        ConfigurationSection settingsSection = null;
+        if (groupSection != null) {
+            settingsSection = groupSection.getConfigurationSection("settings");
+            if (settingsSection == null) {
+                settingsSection = groupSection;
+            }
+        }
 
         this.allowSpectatorOnDeath =
-                worldSection != null
-                        ? worldSection.getBoolean("allow-spectator-on-death", defaultSpectator)
+                settingsSection != null
+                        ? settingsSection.getBoolean("allow-spectator-on-death", defaultSpectator)
                         : defaultSpectator;
 
         this.allowTpAfterDeath =
-                worldSection != null
-                        ? worldSection.getBoolean("allow-tp-after-death", defaultTp)
+                settingsSection != null
+                        ? settingsSection.getBoolean("allow-tp-after-death", defaultTp)
                         : defaultTp;
     }
+
 
     @SuppressWarnings( "unused")
     public String getWorldName() {

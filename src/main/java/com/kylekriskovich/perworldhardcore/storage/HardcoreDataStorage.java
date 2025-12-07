@@ -123,6 +123,17 @@ public class HardcoreDataStorage {
         savePlayerData();
     }
 
+    /**
+     * Remove all stored state and config for a hardcore world group.
+     * This:
+     *  - removes per-world player data for all dimensions,
+     *  - removes all those worlds from the in-memory hardcoreWorlds map,
+     *  - removes the group entry from config, and
+     *  - reloads hardcore worlds from config.
+     */
+
+
+
     // -----------------------------------------------------------------------
     // File / YAML internals
     // -----------------------------------------------------------------------
