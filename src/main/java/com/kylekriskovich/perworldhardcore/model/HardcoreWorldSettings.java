@@ -10,8 +10,7 @@ public class HardcoreWorldSettings {
     private boolean allowSpectatorOnDeath;
     private boolean allowTpAfterDeath;
 
-    public HardcoreWorldSettings(String worldName,
-                                 FileConfiguration config) {
+    public HardcoreWorldSettings(String worldName, FileConfiguration config) {
         this.worldName = worldName;
 
         ConfigurationSection defaults =
@@ -25,15 +24,16 @@ public class HardcoreWorldSettings {
         boolean defaultTp =
                 defaults != null && defaults.getBoolean("allow-tp-after-death", false);
 
-        ConfigurationSection groups = config.getConfigurationSection("hardcore-worlds");
-        ConfigurationSection groupSection =
-                groups != null ? groups.getConfigurationSection(worldName) : null;
+        // World-specific settings under hardcore-worlds.<worldName>
+        ConfigurationSection worldsSection = config.getConfigurationSection("hardcore-worlds");
+        ConfigurationSection worldSection =
+                worldsSection != null ? worldsSection.getConfigurationSection(worldName) : null;
 
         ConfigurationSection settingsSection = null;
-        if (groupSection != null) {
-            settingsSection = groupSection.getConfigurationSection("settings");
+        if (worldSection != null) {
+            settingsSection = worldSection.getConfigurationSection("settings");
             if (settingsSection == null) {
-                settingsSection = groupSection;
+                settingsSection = worldSection;
             }
         }
 
@@ -48,8 +48,7 @@ public class HardcoreWorldSettings {
                         : defaultTp;
     }
 
-
-    @SuppressWarnings( "unused")
+    @SuppressWarnings("unused")
     public String getWorldName() {
         return worldName;
     }
@@ -58,15 +57,15 @@ public class HardcoreWorldSettings {
         return allowSpectatorOnDeath;
     }
 
-    @SuppressWarnings( "unused")
+    @SuppressWarnings("unused")
     public boolean isAllowTpAfterDeath() {
         return allowTpAfterDeath;
     }
 
-    // setters if you want to mutate & save back later
     public void setAllowSpectatorOnDeath(boolean allowSpectatorOnDeath) {
         this.allowSpectatorOnDeath = allowSpectatorOnDeath;
     }
+
     public void setAllowTpAfterDeath(boolean allowTpAfterDeath) {
         this.allowTpAfterDeath = allowTpAfterDeath;
     }

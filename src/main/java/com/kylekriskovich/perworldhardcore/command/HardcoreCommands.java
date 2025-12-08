@@ -2,17 +2,15 @@ package com.kylekriskovich.perworldhardcore.command;
 
 import com.kylekriskovich.perworldhardcore.PerWorldHardcorePlugin;
 import com.kylekriskovich.perworldhardcore.model.HardcoreDimension;
-
 import org.bukkit.Bukkit;
 import org.bukkit.World;
 import org.bukkit.command.Command;
 import org.bukkit.command.CommandExecutor;
 import org.bukkit.command.CommandSender;
 import org.bukkit.plugin.Plugin;
+import org.jetbrains.annotations.NotNull;
 
 import java.util.*;
-
-import org.jetbrains.annotations.NotNull;
 
 public class HardcoreCommands implements CommandExecutor {
 
@@ -21,8 +19,6 @@ public class HardcoreCommands implements CommandExecutor {
     public HardcoreCommands(PerWorldHardcorePlugin plugin) {
         this.plugin = plugin;
 
-        // Optional sanity check – since plugin.yml has depend: [Multiverse-Core],
-        // this *should* always exist, but we’ll log if not.
         Plugin mv = Bukkit.getPluginManager().getPlugin("Multiverse-Core");
         if (mv == null || !mv.isEnabled()) {
             plugin.getLogger().severe("Multiverse-Core Dependency not found or not enabled!");
@@ -33,8 +29,7 @@ public class HardcoreCommands implements CommandExecutor {
     public boolean onCommand(@NotNull CommandSender sender,
                              @NotNull Command command,
                              @NotNull String label,
-                             @NotNull String[] args)
-    {
+                             @NotNull String[] args) {
         if (!sender.hasPermission("hardcore.admin")) {
             sender.sendMessage("No permission.");
             return true;
@@ -67,10 +62,10 @@ public class HardcoreCommands implements CommandExecutor {
 
             case "create":
                 if (args.length < 2) {
-                    sender.sendMessage("Usage: /hardcore create <worldName>");
+                    sender.sendMessage("Usage: /hardcore create <worldName> [flags]");
                     return true;
                 }
-                createHardcoreWorld(sender, new String[]{args[1]});
+                createHardcoreWorld(sender, args);
                 return true;
 
             default:
@@ -79,10 +74,14 @@ public class HardcoreCommands implements CommandExecutor {
         }
     }
 
+    // ------------------------------------------------------------------------
+    // Subcommands
+    // ------------------------------------------------------------------------
+
     private void statusWorld(CommandSender sender, String worldName) {
         World world = Bukkit.getWorld(worldName);
         boolean exists = world != null;
-        boolean hardcore = plugin.isHardcoreWorld(worldName);
+        boolean hardcore = plugin.isHardcoreWorld(world);
 
         sender.sendMessage("World: " + worldName);
         sender.sendMessage("  Exists: " + exists);
@@ -90,15 +89,15 @@ public class HardcoreCommands implements CommandExecutor {
     }
 
     private void cullWorlds(CommandSender sender, boolean delete) {
-        // Now we work with group names, not individual dimension worlds
-        java.util.Set<String> groupCandidates = plugin.findCullableGroups();
+        // Now returns hardcore world ids (config keys)
+        Set<String> worldCandidates = plugin.findCullableWorlds();
 
-        if (groupCandidates.isEmpty()) {
+        if (worldCandidates.isEmpty()) {
             sender.sendMessage("No hardcore worlds are fully dead.");
             return;
         }
 
-        sender.sendMessage("Cullable hardcore worlds: " + String.join(", ", groupCandidates));
+        sender.sendMessage("Cullable hardcore worlds: " + String.join(", ", worldCandidates));
 
         if (!delete) {
             sender.sendMessage("Run /hardcore cull delete to actually delete them via Multiverse.");
@@ -107,22 +106,20 @@ public class HardcoreCommands implements CommandExecutor {
 
         sender.sendMessage("Deleting worlds via Multiverse...");
 
-        for (String groupName : groupCandidates) {
-            // All dimension worlds for this hardcore world
-            java.util.List<String> worldNames = plugin.getWorldNamesForGroup(groupName);
+        for (String worldId : worldCandidates) {
+            // Ask plugin for the physical Bukkit world names (dimensions)
+            List<String> dimensionNames = plugin.getDimensionNamesForWorld(worldId);
 
-            for (String worldName : worldNames) {
-                // Use Multiverse via its command interface
-                Bukkit.dispatchCommand(Bukkit.getConsoleSender(), "mv delete " + worldName);
+            for (String dimensionName : dimensionNames) {
+                Bukkit.dispatchCommand(Bukkit.getConsoleSender(), "mv delete " + dimensionName);
             }
 
-            // Remove group data + config + in-memory mappings
-            plugin.removeWorldGroup(groupName);
+            // Remove the hardcore world + its data
+            plugin.removeHardcoreWorld(worldId);
         }
 
         sender.sendMessage("Cull completed.");
     }
-
 
     private void createHardcoreWorld(CommandSender sender, String[] args) {
         if (args.length < 2) {
@@ -132,29 +129,21 @@ public class HardcoreCommands implements CommandExecutor {
             return;
         }
 
-        String groupName = args[1];
+        String worldId = args[1];
 
-        // --------------------------------------------------------------------
-        // Check max-open-hardcore-worlds based on group count, not dimensions
-        // --------------------------------------------------------------------
-        int maxGroups = plugin.getMaxOpenHardcoreWorlds();
-        int currentGroups = plugin.getHardcoreWorldCount();
-        if (currentGroups >= maxGroups) {
-            sender.sendMessage("Cannot create more hardcore worlds. Limit is " + maxGroups + " groups.");
+        int maxWorlds = plugin.getMaxOpenHardcoreWorlds();
+        int currentWorlds = plugin.getHardcoreWorldCount();
+        if (currentWorlds >= maxWorlds) {
+            sender.sendMessage("Cannot create more hardcore worlds. Limit is " + maxWorlds + " groups.");
             return;
         }
 
-        // Ensure this group doesn't already exist in config
-//        ConfigurationSection groupsSection =
-//                plugin.getConfig().getConfigurationSection("hardcore-worlds");
-//        if (groupsSection != null && groupsSection.isConfigurationSection(groupName)) {
-//            sender.sendMessage("Hardcore world '" + groupName + "' already exists.");
-//            return;
-//        }
+        // Ensure this hardcore world doesn't already exist in config
+        if (plugin.hardcoreWorldExists(worldId)) {
+            sender.sendMessage("Hardcore world '" + worldId + "' already exists.");
+            return;
+        }
 
-        // --------------------------------------------------------------------
-        // Parse args: plugin flags vs Multiverse args
-        // --------------------------------------------------------------------
         Boolean allowSpectatorOverride = null;
         Boolean allowTpAfterDeathOverride = null;
 
@@ -182,7 +171,6 @@ public class HardcoreCommands implements CommandExecutor {
                 continue;
             }
 
-            // Seed flags: recognise but keep them as mv args
             if (arg.equalsIgnoreCase("-s") && i + 1 < args.length) {
                 hasSeedArg = true;
                 mvArgs.add(arg); // "-s"
@@ -196,27 +184,22 @@ public class HardcoreCommands implements CommandExecutor {
                 continue;
             }
 
-            // Everything else is passed straight to mv create
             mvArgs.add(arg);
         }
 
-        // If user didn't give a seed, generate one and add "-s <seed>"
         if (!hasSeedArg) {
             long seed = new Random().nextLong();
             mvArgs.add("-s");
             mvArgs.add(Long.toString(seed));
         }
 
-        // --------------------------------------------------------------------
-        // Build world names per dimension using the enum
-        // --------------------------------------------------------------------
+        // Build the backing dimension names for this hardcore world
         Map<HardcoreDimension, String> dimensionNames = new EnumMap<>(HardcoreDimension.class);
         for (HardcoreDimension dim : HardcoreDimension.values()) {
-            String worldName = dim.worldNameForGroup(groupName);
-            dimensionNames.put(dim, worldName);
+            String dimensionWorldName = dim.worldNameForWorld(worldId); // was worldNameForGroup
+            dimensionNames.put(dim, dimensionWorldName);
         }
 
-        // Ensure Multiverse-Core is available
         Plugin mv = Bukkit.getPluginManager().getPlugin("Multiverse-Core");
         if (mv == null || !mv.isEnabled()) {
             sender.sendMessage("Multiverse-Core is not available. Cannot create worlds.");
@@ -228,26 +211,28 @@ public class HardcoreCommands implements CommandExecutor {
             extraArgs = " " + String.join(" ", mvArgs);
         }
 
-        sender.sendMessage("Creating hardcore world group '" + groupName + "' via Multiverse...");
+        sender.sendMessage("Creating hardcore world group '" + worldId + "' via Multiverse...");
         for (HardcoreDimension dim : HardcoreDimension.values()) {
-            String worldName = dimensionNames.get(dim);
+            String dimensionWorldName = dimensionNames.get(dim);
             String env = dim.getMultiverseEnvironment();
-            sender.sendMessage("  " + dim.name() + ": " + worldName);
-            dispatchConsole(sender, "mv create " + worldName + " " + env + extraArgs);
+            sender.sendMessage("  " + dim.name() + ": " + dimensionWorldName);
+            dispatchConsole(sender, "mv create " + dimensionWorldName + " " + env + extraArgs);
         }
 
-        // --------------------------------------------------------------------
-        // Register group in config + reload in-memory settings
-        // --------------------------------------------------------------------
+        // Register the hardcore world + config
         plugin.addHardcoreWorld(
-                groupName,
+                worldId,
                 dimensionNames,
                 allowSpectatorOverride,
                 allowTpAfterDeathOverride
         );
 
-        sender.sendMessage("Hardcore world group '" + groupName + "' created and registered.");
+        sender.sendMessage("Hardcore world group '" + worldId + "' created and registered.");
     }
+
+    // ------------------------------------------------------------------------
+    // Helpers
+    // ------------------------------------------------------------------------
 
     private void dispatchConsole(CommandSender feedbackTarget, String command) {
         feedbackTarget.sendMessage(" > " + command);
@@ -261,6 +246,4 @@ public class HardcoreCommands implements CommandExecutor {
         if (v.equals("false") || v.equals("no") || v.equals("n")) return false;
         return null;
     }
-
-
 }

@@ -18,7 +18,12 @@ public class HardcoreDataStorage {
     private File dataFile;
     private FileConfiguration dataConfig;
 
-    // All per-player state lives here
+    /**
+     * All per-player state lives here.
+     * Note: in this storage layer, "worldName" refers to the underlying
+     * Bukkit world name (i.e. a single dimension such as "hc-1_nether").
+     * The plugin layer is responsible for grouping these into hardcore worlds.
+     */
     private final Map<UUID, PlayerWorldState> players = new HashMap<>();
 
     public HardcoreDataStorage(PerWorldHardcorePlugin plugin) {
@@ -39,19 +44,23 @@ public class HardcoreDataStorage {
     }
 
     // -----------------------------------------------------------------------
-    // Public API used by plugin / listeners / commands
+    // Public API used by plugin
     // -----------------------------------------------------------------------
 
-    private PlayerWorldState getOrCreateState(UUID uuid) {
-        return players.computeIfAbsent(uuid, PlayerWorldState::new);
-    }
-
+    /**
+     * Check if the player is marked as dead in the given Bukkit world name
+     * (dimension). The plugin layer interprets these per-dimension flags
+     * as hardcore-world-wide death state.
+     */
     public boolean isPlayerDeadInWorld(UUID uuid, String worldName) {
         if (uuid == null || worldName == null) return false;
         PlayerWorldState state = players.get(uuid);
         return state != null && state.isDeadIn(worldName);
     }
 
+    /**
+     * Mark the player as dead in the given Bukkit world name (dimension).
+     */
     public void markPlayerDeadInWorld(UUID uuid, String worldName) {
         if (uuid == null || worldName == null) return;
         PlayerWorldState state = getOrCreateState(uuid);
@@ -60,6 +69,9 @@ public class HardcoreDataStorage {
         savePlayerData(); // fine for a small plugin
     }
 
+    /**
+     * Mark that the player has visited the given Bukkit world name (dimension).
+     */
     public void markPlayerVisitedWorld(UUID uuid, String worldName) {
         if (uuid == null || worldName == null) return;
         PlayerWorldState state = getOrCreateState(uuid);
@@ -68,9 +80,12 @@ public class HardcoreDataStorage {
     }
 
     /**
-     * Returns all hardcore worlds where:
+     * Returns all worlds (Bukkit world names) where:
      * - At least one player has visited, AND
      * - Every visitor is dead in that world.
+     *
+     * The plugin layer uses this to aggregate dimension-level results into
+     * hardcore-world cullability.
      */
     public Set<String> findCullableWorlds(Set<String> hardcoreWorlds, String hubWorldName) {
         Set<String> result = new HashSet<>();
@@ -111,7 +126,9 @@ public class HardcoreDataStorage {
     }
 
     /**
-     * Remove all stored state for a world (after it has been deleted).
+     * Remove all stored state for a world (Bukkit world name / dimension)
+     * after it has been deleted.
+     *
      * Does NOT touch the hardcore-worlds config list – plugin handles that.
      */
     public void removeWorldData(String worldName) {
@@ -122,17 +139,6 @@ public class HardcoreDataStorage {
         }
         savePlayerData();
     }
-
-    /**
-     * Remove all stored state and config for a hardcore world group.
-     * This:
-     *  - removes per-world player data for all dimensions,
-     *  - removes all those worlds from the in-memory hardcoreWorlds map,
-     *  - removes the group entry from config, and
-     *  - reloads hardcore worlds from config.
-     */
-
-
 
     // -----------------------------------------------------------------------
     // File / YAML internals
@@ -218,5 +224,13 @@ public class HardcoreDataStorage {
         } catch (IOException e) {
             plugin.getLogger().log(Level.SEVERE, "Could not save data.yml", e);
         }
+    }
+
+    // -----------------------------------------------------------------------
+    // Private helpers
+    // -----------------------------------------------------------------------
+
+    private PlayerWorldState getOrCreateState(UUID uuid) {
+        return players.computeIfAbsent(uuid, PlayerWorldState::new);
     }
 }

@@ -16,7 +16,7 @@ public enum HardcoreDimension {
     }
 
     /**
-     * Key used under hardcore-worlds.<group>.dimensions.<configKey>
+     * Key used under hardcore-worlds.<worldId>.dimensions.<configKey>
      * e.g. "overworld", "nether", "end".
      */
     public String getConfigKey() {
@@ -24,7 +24,7 @@ public enum HardcoreDimension {
     }
 
     /**
-     * Suffix appended to the groupName to form the actual Bukkit world name.
+     * Suffix appended to the hardcore world id to form the actual Bukkit world name.
      * e.g. "", "_nether", "_the_end".
      */
     public String getWorldNameSuffix() {
@@ -40,10 +40,11 @@ public enum HardcoreDimension {
     }
 
     /**
-     * Compute the world name for this dimension given the group (base) name.
+     * Compute the Bukkit world name for this dimension given the hardcore world id.
+     * For example, worldId "hc-1" becomes "hc-1", "hc-1_nether", "hc-1_the_end".
      */
-    public String worldNameForGroup(String groupName) {
-        return groupName + worldNameSuffix;
+    public String worldNameForWorld(String worldId) {
+        return worldId + worldNameSuffix;
     }
 
     /**
