@@ -173,8 +173,8 @@ public class HardcoreCommands implements CommandExecutor {
 
             if (arg.equalsIgnoreCase("-s") && i + 1 < args.length) {
                 hasSeedArg = true;
-                mvArgs.add(arg); // "-s"
-                mvArgs.add(args[++i]); // seed value
+                mvArgs.add(arg);          // "-s"
+                mvArgs.add(args[++i]);    // seed value
                 continue;
             }
 
@@ -187,16 +187,10 @@ public class HardcoreCommands implements CommandExecutor {
             mvArgs.add(arg);
         }
 
-        if (!hasSeedArg) {
-            long seed = new Random().nextLong();
-            mvArgs.add("-s");
-            mvArgs.add(Long.toString(seed));
-        }
-
         // Build the backing dimension names for this hardcore world
         Map<HardcoreDimension, String> dimensionNames = new EnumMap<>(HardcoreDimension.class);
         for (HardcoreDimension dim : HardcoreDimension.values()) {
-            String dimensionWorldName = dim.worldNameForWorld(worldId); // was worldNameForGroup
+            String dimensionWorldName = dim.worldNameForWorld(worldId);
             dimensionNames.put(dim, dimensionWorldName);
         }
 
@@ -206,17 +200,62 @@ public class HardcoreCommands implements CommandExecutor {
             return;
         }
 
-        String extraArgs = "";
+        String baseArgs = "";
         if (!mvArgs.isEmpty()) {
-            extraArgs = " " + String.join(" ", mvArgs);
+            baseArgs = " " + String.join(" ", mvArgs);
         }
 
         sender.sendMessage("Creating hardcore world group '" + worldId + "' via Multiverse...");
         for (HardcoreDimension dim : HardcoreDimension.values()) {
             String dimensionWorldName = dimensionNames.get(dim);
-            String env = dim.getMultiverseEnvironment();
             sender.sendMessage("  " + dim.name() + ": " + dimensionWorldName);
-            dispatchConsole(sender, "mv create " + dimensionWorldName + " " + env + extraArgs);
+        }
+
+        // --- Actual world creation logic ---------------------------------------
+
+        if (hasSeedArg) {
+            // User specified a seed: use the same args for all three dimensions
+            for (HardcoreDimension dim : HardcoreDimension.values()) {
+                String dimensionWorldName = dimensionNames.get(dim);
+                String env = dim.getMultiverseEnvironment();
+                dispatchConsole(sender, "mv create " + dimensionWorldName + " " + env + baseArgs);
+            }
+        } else {
+            // No seed specified:
+            // 1) Create overworld with NO seed flag
+            String overworldName = dimensionNames.get(HardcoreDimension.OVERWORLD);
+            String overworldEnv = HardcoreDimension.OVERWORLD.getMultiverseEnvironment();
+
+            dispatchConsole(sender, "mv create " + overworldName + " " + overworldEnv + baseArgs);
+
+            // 2) Read overworld seed
+            long seed = 0L;
+            boolean haveSeed = false;
+            World overworld = Bukkit.getWorld(overworldName);
+            if (overworld != null) {
+                seed = overworld.getSeed();
+                haveSeed = true;
+            } else {
+                plugin.getLogger().warning(
+                        "Could not load overworld '" + overworldName +
+                                "' after creation; nether/end will use their own random seeds.");
+            }
+
+            // 3) Create nether + end using that seed (if we could read it)
+            for (HardcoreDimension dim : HardcoreDimension.values()) {
+                if (dim == HardcoreDimension.OVERWORLD) {
+                    continue; // already created
+                }
+
+                String dimensionWorldName = dimensionNames.get(dim);
+                String env = dim.getMultiverseEnvironment();
+
+                String cmd = "mv create " + dimensionWorldName + " " + env + baseArgs;
+                if (haveSeed) {
+                    cmd = cmd + " -s " + seed;
+                }
+                dispatchConsole(sender, cmd);
+            }
         }
 
         // Register the hardcore world + config
@@ -237,6 +276,13 @@ public class HardcoreCommands implements CommandExecutor {
     private void dispatchConsole(CommandSender feedbackTarget, String command) {
         feedbackTarget.sendMessage(" > " + command);
         Bukkit.dispatchCommand(Bukkit.getConsoleSender(), command);
+
+        // If Multiverse confirm-mode is "enable" or similar, dangerous commands
+        // (like mv create / mv delete) will require /mv confirm.
+        // Calling it here is harmless if there is nothing pending.
+        if (command.startsWith("mv ")) {
+            Bukkit.dispatchCommand(Bukkit.getConsoleSender(), "mv confirm");
+        }
     }
 
     private Boolean parseBooleanFlag(String value) {

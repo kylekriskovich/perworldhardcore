@@ -69,9 +69,6 @@ public class HardcoreDataStorage {
         savePlayerData(); // fine for a small plugin
     }
 
-    /**
-     * Mark that the player has visited the given Bukkit world name (dimension).
-     */
     public void markPlayerVisitedWorld(UUID uuid, String worldName) {
         if (uuid == null || worldName == null) return;
         PlayerWorldState state = getOrCreateState(uuid);
@@ -79,24 +76,14 @@ public class HardcoreDataStorage {
         savePlayerData();
     }
 
-    /**
-     * Returns all worlds (Bukkit world names) where:
-     * - At least one player has visited, AND
-     * - Every visitor is dead in that world.
-     *
-     * The plugin layer uses this to aggregate dimension-level results into
-     * hardcore-world cullability.
-     */
     public Set<String> findCullableWorlds(Set<String> hardcoreWorlds, String hubWorldName) {
         Set<String> result = new HashSet<>();
 
         for (String worldName : hardcoreWorlds) {
             if (worldName.equalsIgnoreCase(hubWorldName)) {
-                // Never auto-cull the hub
                 continue;
             }
 
-            // Collect all players who have visited this world
             List<PlayerWorldState> visitors = new ArrayList<>();
             for (PlayerWorldState state : players.values()) {
                 if (state.hasVisited(worldName)) {
@@ -105,7 +92,6 @@ public class HardcoreDataStorage {
             }
 
             if (visitors.isEmpty()) {
-                // Nobody has been there → can't say "everyone died"
                 continue;
             }
 

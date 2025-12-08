@@ -18,10 +18,6 @@ import java.util.*;
 
 public class PerWorldHardcorePlugin extends JavaPlugin {
 
-    /**
-     * Map of Bukkit dimension names -> hardcore world settings.
-     * (e.g. "hc-1", "hc-1_nether", "hc-1_the_end" all point to the same settings instance)
-     */
     private final Map<String, HardcoreWorldSettings> hardcoreDimensions = new HashMap<>();
 
     private HardcoreDataStorage dataStorage;
@@ -30,9 +26,6 @@ public class PerWorldHardcorePlugin extends JavaPlugin {
     private Plugin multiverseInventories;
     private MessageManager messageManager;
 
-    // ------------------------------------------------------------------------
-    // Lifecycle
-    // ------------------------------------------------------------------------
 
     @Override
     public void onEnable() {
@@ -70,14 +63,8 @@ public class PerWorldHardcorePlugin extends JavaPlugin {
         getLogger().info("PerWorldHardcore disabled.");
     }
 
-    // ------------------------------------------------------------------------
-    // Hardcore world registry / config
-    // ------------------------------------------------------------------------
+    // Hardcore world registry
 
-    /**
-     * Load hardcore worlds (player-facing worlds) and their backing dimensions
-     * from config into the in-memory dimension map.
-     */
     public void loadHardcoreWorlds() {
         hardcoreDimensions.clear();
 
@@ -110,7 +97,6 @@ public class PerWorldHardcorePlugin extends JavaPlugin {
                     }
                 }
             } else {
-                // Backwards compatibility: treat the world name itself as a single dimension
                 dimensionNames.add(worldName);
             }
 
@@ -122,9 +108,6 @@ public class PerWorldHardcorePlugin extends JavaPlugin {
         getLogger().info("PerWorldHardcore loaded hardcore worlds: " + hardcoreDimensions.keySet());
     }
 
-    /**
-     * Number of hardcore worlds (player-facing) defined in config.
-     */
     public int getHardcoreWorldCount() {
         ConfigurationSection worldsSection = getConfig().getConfigurationSection("hardcore-worlds");
         if (worldsSection == null) {
@@ -133,10 +116,6 @@ public class PerWorldHardcorePlugin extends JavaPlugin {
         return worldsSection.getKeys(false).size();
     }
 
-    /**
-     * Add a new hardcore world (player-facing), with its backing dimensions and settings,
-     * to config and reload the in-memory mappings.
-     */
     public void addHardcoreWorld(String worldName,
                                  Map<HardcoreDimension, String> dimensionNames,
                                  Boolean allowSpectatorOverride,
@@ -193,10 +172,6 @@ public class PerWorldHardcorePlugin extends JavaPlugin {
         loadHardcoreWorlds();
     }
 
-    /**
-     * Remove a hardcore world (player-facing) and all its backing dimensions from
-     * player state, in-memory registry, and config.
-     */
     public void removeHardcoreWorld(String worldName) {
         if (worldName == null || worldName.isBlank()) return;
 
@@ -220,11 +195,6 @@ public class PerWorldHardcorePlugin extends JavaPlugin {
         loadHardcoreWorlds();
     }
 
-    /**
-     * Return the Bukkit dimension names for a given hardcore world (player-facing).
-     * Exposed so command handlers can call Multiverse with the actual world names
-     * without needing to know how they are derived.
-     */
     public List<String> getDimensionNamesForWorld(String worldName) {
         List<String> result = new ArrayList<>();
         if (worldName == null || worldName.isBlank()) return result;
@@ -235,7 +205,6 @@ public class PerWorldHardcorePlugin extends JavaPlugin {
 
         ConfigurationSection worldSection = worldsSection.getConfigurationSection(worldName);
         if (worldSection == null) {
-            // Legacy: treat the world name itself as the only dimension
             result.add(worldName);
             return result;
         }
@@ -249,25 +218,17 @@ public class PerWorldHardcorePlugin extends JavaPlugin {
                 }
             }
         } else {
-            // Legacy
             result.add(worldName);
         }
 
         return result;
     }
 
-    /**
-     * Find hardcore worlds (player-facing) that are cullable, based on dimension-level
-     * cullable data from the data store.
-     *
-     * @return set of hardcore world ids (config keys under "hardcore-worlds")
-     */
     public Set<String> findCullableWorlds() {
         if (dataStorage == null) {
             return Collections.emptySet();
         }
 
-        // Dimension-level candidates
         Set<String> dimensionNames = getHardcoreDimensions();
         Set<String> dimensionCandidates =
                 dataStorage.findCullableWorlds(dimensionNames, getHubWorldName());
@@ -286,7 +247,6 @@ public class PerWorldHardcorePlugin extends JavaPlugin {
             List<String> dimensionsInWorld = getDimensionNamesForWorld(worldName);
             if (dimensionsInWorld.isEmpty()) continue;
 
-            // If ANY dimension in this world is cullable, treat the whole world as cullable
             boolean anyCullable = false;
             for (String dimensionName : dimensionsInWorld) {
                 if (dimensionCandidates.contains(dimensionName)) {
@@ -303,9 +263,6 @@ public class PerWorldHardcorePlugin extends JavaPlugin {
         return result;
     }
 
-    /**
-     * Does a hardcore world (player-facing) with this name exist in config?
-     */
     public boolean hardcoreWorldExists(String worldName) {
         if (worldName == null || worldName.isBlank()) {
             return false;
@@ -319,14 +276,8 @@ public class PerWorldHardcorePlugin extends JavaPlugin {
         return worldsSection.isConfigurationSection(worldName);
     }
 
-    // ------------------------------------------------------------------------
-    // Player state helpers (world-based)
-    // ------------------------------------------------------------------------
+    // Player state helpers
 
-    /**
-     * World-level (player-facing): interpret the given Bukkit world as part of a hardcore
-     * world and check across all of that world's dimensions.
-     */
     public boolean hasDiedInWorld(UUID playerId, World bukkitWorld) {
         if (dataStorage == null || bukkitWorld == null) return false;
 
@@ -343,9 +294,6 @@ public class PerWorldHardcorePlugin extends JavaPlugin {
         return false;
     }
 
-    /**
-     * Mark a player as dead in all dimensions of the hardcore world that this Bukkit world belongs to.
-     */
     public void markPlayerDeadInWorld(UUID playerId, World bukkitWorld) {
         if (dataStorage == null || bukkitWorld == null) return;
 
@@ -359,9 +307,6 @@ public class PerWorldHardcorePlugin extends JavaPlugin {
         }
     }
 
-    /**
-     * Mark a player as having visited all dimensions of the hardcore world that this Bukkit world belongs to.
-     */
     public void markPlayerVisitedWorld(UUID playerId, World bukkitWorld) {
         if (dataStorage == null || bukkitWorld == null) return;
 
@@ -375,21 +320,13 @@ public class PerWorldHardcorePlugin extends JavaPlugin {
         }
     }
 
-    // ------------------------------------------------------------------------
-    // Runtime query helpers / config access
-    // ------------------------------------------------------------------------
+    // Config access
 
-    /**
-     * Is this Bukkit world part of any hardcore world?
-     */
     public boolean isHardcoreWorld(World bukkitWorld) {
         if (bukkitWorld == null) return false;
         return isHardcoreDimension(bukkitWorld.getName());
     }
 
-    /**
-     * Get settings for the hardcore world that this Bukkit world belongs to.
-     */
     public HardcoreWorldSettings getHardcoreWorldSettings(World bukkitWorld) {
         if (bukkitWorld == null) return null;
         return getHardcoreWorldSettingsForDimension(bukkitWorld.getName());
@@ -415,9 +352,7 @@ public class PerWorldHardcorePlugin extends JavaPlugin {
         return Bukkit.getWorld(getHubWorldName());
     }
 
-    // ------------------------------------------------------------------------
     // Dependency / integration helpers
-    // ------------------------------------------------------------------------
 
     public boolean checkHardDependencies() {
         PluginManager pm = getServer().getPluginManager();
@@ -463,48 +398,30 @@ public class PerWorldHardcorePlugin extends JavaPlugin {
         return messageManager;
     }
 
-    // ------------------------------------------------------------------------
     // Private helpers (dimensions / storage)
-    // ------------------------------------------------------------------------
 
-    /**
-     * All hardcore dimensions (Bukkit world names) currently registered.
-     */
     private Set<String> getHardcoreDimensions() {
         return new HashSet<>(hardcoreDimensions.keySet());
     }
 
-    /**
-     * Given a dimension name (Bukkit world name), return the hardcore world name it belongs to.
-     */
     private String getWorldNameForDimension(String dimensionName) {
         if (dimensionName == null) return null;
         HardcoreWorldSettings settings = hardcoreDimensions.get(dimensionName);
         if (settings == null) return null;
 
-        // In the current design, HardcoreWorldSettings worldName == hardcore world id
         return settings.getWorldName();
     }
 
-    /**
-     * Remove all player data for a specific Bukkit dimension.
-     */
     private void removeDimensionData(String dimensionName) {
         if (dataStorage != null) {
             dataStorage.removeWorldData(dimensionName);
         }
     }
 
-    /**
-     * Dimension-level check: is this Bukkit world name part of any hardcore world?
-     */
     private boolean isHardcoreDimension(String dimensionName) {
         return dimensionName != null && hardcoreDimensions.containsKey(dimensionName);
     }
 
-    /**
-     * Dimension-level: get settings for the hardcore world this dimension belongs to.
-     */
     private HardcoreWorldSettings getHardcoreWorldSettingsForDimension(String dimensionName) {
         return hardcoreDimensions.get(dimensionName);
     }

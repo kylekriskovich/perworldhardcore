@@ -2,6 +2,8 @@ package com.kylekriskovich.perworldhardcore.listener;
 
 import com.kylekriskovich.perworldhardcore.PerWorldHardcorePlugin;
 import com.kylekriskovich.perworldhardcore.model.HardcoreWorldSettings;
+import org.bukkit.Bukkit;
+import org.bukkit.ChatColor;
 import org.bukkit.GameMode;
 import org.bukkit.World;
 import org.bukkit.entity.Player;
@@ -12,112 +14,183 @@ import org.bukkit.event.player.PlayerChangedWorldEvent;
 import org.bukkit.event.player.PlayerJoinEvent;
 import org.bukkit.event.player.PlayerRespawnEvent;
 
+import java.util.Map;
 import java.util.UUID;
+import java.util.concurrent.ConcurrentHashMap;
 
 public class HardcorePlayerListener implements Listener {
 
     private final PerWorldHardcorePlugin plugin;
 
+    /**
+     * Tracks the Bukkit world name (dimension) in which the player last died.
+     * Used so respawn logic can reason about the correct hardcore world even if
+     * the respawn happens in another dimension (e.g. die in nether, respawn in overworld).
+     */
+    private final Map<UUID, String> lastDeathDimension = new ConcurrentHashMap<>();
+
     public HardcorePlayerListener(PerWorldHardcorePlugin plugin) {
         this.plugin = plugin;
     }
+
+    // ------------------------------------------------------------------------
+    // Death
+    // ------------------------------------------------------------------------
 
     @EventHandler
     public void onPlayerDeath(PlayerDeathEvent event) {
         Player player = event.getEntity();
         World world = player.getWorld();
+        if (world == null) return;
 
-        HardcoreWorldSettings settings = getSettings(world);
-        if (settings == null) {
+        // Only care if this dimension belongs to a hardcore world
+        if (!plugin.isHardcoreWorld(world)) {
             return;
         }
 
-        // Track visit + death for this hardcore world (all its dimensions)
         UUID playerId = player.getUniqueId();
-        plugin.markPlayerVisitedWorld(playerId, world);
+        String dimensionName = world.getName();
+
+        // Remember which dimension they died in for respawn logic
+        lastDeathDimension.put(playerId, dimensionName);
+
+        // Mark death & visit at hardcore-world level (plugin handles dimension fan-out)
         plugin.markPlayerDeadInWorld(playerId, world);
+        plugin.markPlayerVisitedWorld(playerId, world);
     }
+
+    // ------------------------------------------------------------------------
+    // Respawn
+    // ------------------------------------------------------------------------
 
     @EventHandler
     public void onPlayerRespawn(PlayerRespawnEvent event) {
         Player player = event.getPlayer();
         UUID playerId = player.getUniqueId();
-        World deathWorld = player.getWorld();
 
-        HardcoreWorldSettings settings = getSettings(deathWorld);
+        // Prefer the dimension they actually died in
+        String deathDimensionName = lastDeathDimension.remove(playerId);
+        World basisWorld = null;
+
+        if (deathDimensionName != null) {
+            basisWorld = Bukkit.getWorld(deathDimensionName);
+        }
+
+        // Fallback: use the world they are respawning into if we couldn't resolve death world
+        if (basisWorld == null) {
+            basisWorld = event.getRespawnLocation().getWorld();
+        }
+
+        if (basisWorld == null || !plugin.isHardcoreWorld(basisWorld)) {
+            // Not in any hardcore world -> normal behaviour
+            return;
+        }
+
+        HardcoreWorldSettings settings = plugin.getHardcoreWorldSettings(basisWorld);
         if (settings == null) {
             return;
         }
 
-        if (plugin.hasDiedInWorld(playerId, deathWorld)) {
-            World hub = plugin.getHubWorld();
-            if (hub == null) {
-                plugin.getLogger().warning("Hub world not found; cannot redirect respawn.");
-                return;
+        // Has this player died in this hardcore world (across all its dimensions)?
+        if (!plugin.hasDiedInWorld(playerId, basisWorld)) {
+            return;
+        }
+
+        World hub = plugin.getHubWorld();
+        if (hub == null) {
+            plugin.getLogger().warning("Hub world not found; cannot redirect respawn.");
+            return;
+        }
+
+        if (settings.isAllowSpectatorOnDeath()) {
+            // Respawn inside the hardcore world, but as spectator.
+            // If respawn location is outside a hardcore world for some reason,
+            // nudge them into the basisWorld spawn.
+            World respawnWorld = event.getRespawnLocation().getWorld();
+            if (respawnWorld == null || !plugin.isHardcoreWorld(respawnWorld)) {
+                event.setRespawnLocation(basisWorld.getSpawnLocation());
             }
 
-            if (settings.isAllowSpectatorOnDeath()) {
-                plugin.getServer().getScheduler().runTask(plugin,
-                        () -> player.setGameMode(GameMode.SPECTATOR));
-            } else {
-                event.setRespawnLocation(hub.getSpawnLocation());
-                plugin.getServer().getScheduler().runTask(plugin,
-                        () -> player.setGameMode(GameMode.SURVIVAL));
-            }
+            plugin.getServer().getScheduler().runTask(plugin, () -> {
+                player.setGameMode(GameMode.SPECTATOR);
+                player.sendMessage(ChatColor.RED + "You have died in hardcore world "
+                        + ChatColor.RED
+                        + ". You may now only spectate this world.");
+            });
+        } else {
+            // No spectator allowed: force respawn at hub in survival
+            event.setRespawnLocation(hub.getSpawnLocation());
+            plugin.getServer().getScheduler().runTask(plugin, () -> {
+                player.setGameMode(GameMode.SURVIVAL);
+                player.sendMessage(ChatColor.RED + "You have died in hardcore world "
+                        + ChatColor.RED
+                        + ". You have been returned to the hub.");
+            });
         }
     }
+
+    // ------------------------------------------------------------------------
+    // Join / World change → enforce restrictions + track visits
+    // ------------------------------------------------------------------------
 
     @EventHandler
     public void onPlayerJoin(PlayerJoinEvent event) {
         Player player = event.getPlayer();
-        UUID playerId = player.getUniqueId();
-        World joinWorld = player.getWorld();
-
-        HardcoreWorldSettings settings = getSettings(joinWorld);
-        if (settings == null) {
-            return;
-        }
-
-        // Joining into a hardcore world counts as a visit
-        plugin.markPlayerVisitedWorld(playerId, joinWorld);
-
-        if (plugin.hasDiedInWorld(playerId, joinWorld)) {
-            World hub = plugin.getHubWorld();
-            if (hub == null) {
-                plugin.getLogger().warning("Hub world not found; cannot redirect join.");
-                return;
-            }
-
-            if (settings.isAllowSpectatorOnDeath()) {
-                plugin.getServer().getScheduler().runTask(plugin,
-                        () -> player.setGameMode(GameMode.SPECTATOR));
-            } else {
-                plugin.getServer().getScheduler().runTask(plugin, () -> {
-                    player.teleport(hub.getSpawnLocation());
-                    player.setGameMode(GameMode.SURVIVAL);
-                });
-            }
-        }
+        handleEnterWorld(player, player.getWorld());
     }
 
     @EventHandler
     public void onPlayerChangedWorld(PlayerChangedWorldEvent event) {
         Player player = event.getPlayer();
-        World toWorld = player.getWorld();
-
-        HardcoreWorldSettings settings = getSettings(toWorld);
-        if (settings != null) {
-            // Any time a player enters a hardcore world, count it as a visit
-            plugin.markPlayerVisitedWorld(player.getUniqueId(), toWorld);
-        }
+        handleEnterWorld(player, player.getWorld());
     }
 
-    // ------------------------------------------------------------------------
-    // Private helpers
-    // ------------------------------------------------------------------------
+    /**
+     * Common logic when a player is in some world after join/world-change.
+     * Marks visit and enforces post-death restrictions if applicable.
+     */
+    private void handleEnterWorld(Player player, World world) {
+        if (world == null) return;
 
-    private HardcoreWorldSettings getSettings(World world) {
-        if (world == null) return null;
-        return plugin.getHardcoreWorldSettings(world);
+        // Ignore non-hardcore worlds
+        if (!plugin.isHardcoreWorld(world)) {
+            return;
+        }
+
+        UUID playerId = player.getUniqueId();
+        HardcoreWorldSettings settings = plugin.getHardcoreWorldSettings(world);
+        if (settings == null) {
+            return;
+        }
+
+        // Mark visited at hardcore-world level
+        plugin.markPlayerVisitedWorld(playerId, world);
+
+        // If they've died in this hardcore world, enforce settings
+        if (plugin.hasDiedInWorld(playerId, world)) {
+            World hub = plugin.getHubWorld();
+            if (hub == null) {
+                plugin.getLogger().warning("Hub world not found; cannot redirect join/world-change.");
+                return;
+            }
+
+            if (settings.isAllowSpectatorOnDeath()) {
+                plugin.getServer().getScheduler().runTask(plugin, () -> {
+                    player.setGameMode(GameMode.SPECTATOR);
+                    player.sendMessage(ChatColor.RED + "You have already died in hardcore world "
+                            + ChatColor.RED
+                            + ". You are now in spectator mode.");
+                });
+
+            } else {
+                plugin.getServer().getScheduler().runTask(plugin, () -> {
+                    player.teleport(hub.getSpawnLocation());
+                    player.setGameMode(GameMode.SURVIVAL);
+                    player.sendMessage(ChatColor.RED + "You cannot re-enter hardcore world "
+                            + ChatColor.RED
+                            + " because you have already died there.");
+                });
+            }
+        }
     }
 }
