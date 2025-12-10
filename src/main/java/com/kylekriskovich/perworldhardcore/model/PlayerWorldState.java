@@ -8,6 +8,12 @@ import java.util.UUID;
 public class PlayerWorldState {
 
     private final UUID playerId;
+
+    /**
+     * In the storage layer, "worldName" refers to a Bukkit world name
+     * (i.e. a single dimension such as "hc-1" or "hc-1_nether").
+     * The plugin layer groups these into hardcore worlds.
+     */
     private final Set<String> deadWorlds = new HashSet<>();
     private final Set<String> visitedWorlds = new HashSet<>();
 
@@ -15,7 +21,7 @@ public class PlayerWorldState {
         this.playerId = playerId;
     }
 
-    @SuppressWarnings( "unused")
+    @SuppressWarnings("unused")
     public UUID getPlayerId() {
         return playerId;
     }

@@ -5,12 +5,5 @@ defaults_settings:
   allow-tp-after-death: false
 
 hardcore-worlds:
-  hc-1:
-    allow-spectator-on-death: true
-    allow-tp-after-death: false
-
-  hc-2:
-    allow-spectator-on-death: false
-    allow-tp-after-death: false
 
 max-open-hardcore-worlds: 3

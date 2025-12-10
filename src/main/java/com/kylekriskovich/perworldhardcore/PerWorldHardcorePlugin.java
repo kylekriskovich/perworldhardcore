@@ -2,11 +2,15 @@ package com.kylekriskovich.perworldhardcore;
 
 import com.kylekriskovich.perworldhardcore.command.HardcoreCommands;
 import com.kylekriskovich.perworldhardcore.listener.HardcorePlayerListener;
+import com.kylekriskovich.perworldhardcore.model.HardcoreDimension;
 import com.kylekriskovich.perworldhardcore.model.HardcoreWorldSettings;
 import com.kylekriskovich.perworldhardcore.storage.HardcoreDataStorage;
 import com.kylekriskovich.perworldhardcore.util.MessageManager;
+
 import org.bukkit.Bukkit;
 import org.bukkit.World;
+import org.bukkit.Difficulty;
+import org.bukkit.configuration.ConfigurationSection;
 import org.bukkit.plugin.Plugin;
 import org.bukkit.plugin.PluginManager;
 import org.bukkit.plugin.java.JavaPlugin;
@@ -15,7 +19,7 @@ import java.util.*;
 
 public class PerWorldHardcorePlugin extends JavaPlugin {
 
-    private final Map<String, HardcoreWorldSettings> hardcoreWorlds = new HashMap<>();
+    private final Map<String, HardcoreWorldSettings> hardcoreDimensions = new HashMap<>();
 
     private HardcoreDataStorage dataStorage;
 
@@ -23,36 +27,33 @@ public class PerWorldHardcorePlugin extends JavaPlugin {
     private Plugin multiverseInventories;
     private MessageManager messageManager;
 
+
     @Override
     public void onEnable() {
         this.messageManager = new MessageManager(this);
 
-        // Check hard deps (Core + NetherPortals)
         if (!checkHardDependencies()) {
             getServer().getPluginManager().disablePlugin(this);
             return;
         }
         setHasMultiverseInventories();
 
-        // Make sure config.yml exists
         saveDefaultConfig();
 
-        // Load hardcore worlds + their settings from config
         loadHardcoreWorlds();
 
-        // Init storage (data.yml)
         dataStorage = new HardcoreDataStorage(this);
         dataStorage.init();
 
-        getLogger().info("PerWorldHardcore enabled. Hardcore worlds: " + hardcoreWorlds.keySet());
+        enforceHardDifficultyForAllHardcoreWorlds();
 
-        // Register listeners
+        getLogger().info("PerWorldHardcore enabled. Hardcore worlds: " + hardcoreDimensions.keySet());
+
         getServer().getPluginManager().registerEvents(
                 new HardcorePlayerListener(this),
                 this
         );
 
-        // Register command
         Objects.requireNonNull(getCommand("hardcore"))
                 .setExecutor(new HardcoreCommands(this));
     }
@@ -65,106 +66,283 @@ public class PerWorldHardcorePlugin extends JavaPlugin {
         getLogger().info("PerWorldHardcore disabled.");
     }
 
+    // Hardcore world registry
+
     public void loadHardcoreWorlds() {
-        hardcoreWorlds.clear();
+        hardcoreDimensions.clear();
 
-        List<String> worldsFromConfig = getConfig().getStringList("hardcore-worlds");
-        getLogger().info("Config hardcore-worlds raw: " + worldsFromConfig);
-
-        if (worldsFromConfig.isEmpty()) {
+        ConfigurationSection worldsSection = getConfig().getConfigurationSection("hardcore-worlds");
+        if (worldsSection == null || worldsSection.getKeys(false).isEmpty()) {
             getLogger().warning("No hardcore-worlds defined in config.yml");
             return;
         }
 
-        boolean globalSpectator = getConfig().getBoolean("allow-spectator-on-death", true);
-        boolean globalTpAfterDeath = getConfig().getBoolean("allow-tp-after-death", false);
-
-        for (String name : worldsFromConfig) {
-            if (name == null || name.isBlank()) {
+        for (String worldName : worldsSection.getKeys(false)) {
+            if (worldName == null || worldName.isBlank()) {
                 continue;
             }
 
-            HardcoreWorldSettings settings = new HardcoreWorldSettings(name, getConfig());
-            settings.setAllowSpectatorOnDeath(globalSpectator);
-            settings.setAllowTpAfterDeath(globalTpAfterDeath);
+            ConfigurationSection worldSection = worldsSection.getConfigurationSection(worldName);
+            if (worldSection == null) {
+                continue;
+            }
 
-            hardcoreWorlds.put(name, settings);
+            HardcoreWorldSettings settings = new HardcoreWorldSettings(worldName, getConfig());
+
+            List<String> dimensionNames = new ArrayList<>();
+
+            ConfigurationSection dimSection = worldSection.getConfigurationSection("dimensions");
+            if (dimSection != null && !dimSection.getKeys(false).isEmpty()) {
+                for (String dimKey : dimSection.getKeys(false)) {
+                    String dimensionName = dimSection.getString(dimKey);
+                    if (dimensionName != null && !dimensionName.isBlank()) {
+                        dimensionNames.add(dimensionName);
+                    }
+                }
+            } else {
+                dimensionNames.add(worldName);
+            }
+
+            for (String dimensionName : dimensionNames) {
+                hardcoreDimensions.put(dimensionName, settings);
+            }
         }
+
+        getLogger().info("PerWorldHardcore loaded hardcore worlds: " + hardcoreDimensions.keySet());
     }
 
-    // ------------------------------------------------------------------------
-    // Player state helpers (proxy to HardcoreDataStorage)
-    // ------------------------------------------------------------------------
-
-    public boolean hasDiedInWorld(UUID uuid, String worldName) {
-        return dataStorage != null && dataStorage.isPlayerDeadInWorld(uuid, worldName);
+    public int getHardcoreWorldCount() {
+        ConfigurationSection worldsSection = getConfig().getConfigurationSection("hardcore-worlds");
+        if (worldsSection == null) {
+            return 0;
+        }
+        return worldsSection.getKeys(false).size();
     }
 
-    public void markPlayerDeadInWorld(UUID uuid, String worldName) {
-        if (dataStorage != null) {
-            dataStorage.markPlayerDeadInWorld(uuid, worldName);
+    public String getHardcoreWorldId(World world) {
+        if (world == null) return null;
+
+        HardcoreWorldSettings settings = hardcoreDimensions.get(world.getName());
+        if (settings == null) {
+            return null;
         }
+
+        // HardcoreWorldSettings.worldName is your hardcore world id / group name
+        return settings.getWorldName();
     }
 
-    public void markPlayerVisitedWorld(UUID uuid, String worldName) {
-        if (dataStorage != null) {
-            dataStorage.markPlayerVisitedWorld(uuid, worldName);
+    public void addHardcoreWorld(String worldName,
+                                 Map<HardcoreDimension, String> dimensionNames,
+                                 Boolean allowSpectatorOverride,
+                                 Boolean allowTpAfterDeathOverride) {
+        if (worldName == null || worldName.isBlank()) return;
+
+        ConfigurationSection worldsSection =
+                getConfig().getConfigurationSection("hardcore-worlds");
+        if (worldsSection == null) {
+            worldsSection = getConfig().createSection("hardcore-worlds");
         }
+
+        ConfigurationSection worldSection =
+                worldsSection.getConfigurationSection(worldName);
+        if (worldSection == null) {
+            worldSection = worldsSection.createSection(worldName);
+        }
+
+        ConfigurationSection dimSection =
+                worldSection.getConfigurationSection("dimensions");
+        if (dimSection == null) {
+            dimSection = worldSection.createSection("dimensions");
+        }
+
+        for (HardcoreDimension dim : HardcoreDimension.values()) {
+            String dimensionName = dimensionNames.get(dim);
+            if (dimensionName != null && !dimensionName.isBlank()) {
+                dimSection.set(dim.getConfigKey(), dimensionName);
+            }
+        }
+
+        ConfigurationSection defaults =
+                getConfig().getConfigurationSection("defaults_settings");
+        boolean defaultSpectator =
+                defaults != null && defaults.getBoolean("allow-spectator-on-death", true);
+        boolean defaultTp =
+                defaults != null && defaults.getBoolean("allow-tp-after-death", false);
+
+        boolean spectator =
+                allowSpectatorOverride != null ? allowSpectatorOverride : defaultSpectator;
+        boolean tpAfterDeath =
+                allowTpAfterDeathOverride != null ? allowTpAfterDeathOverride : defaultTp;
+
+        ConfigurationSection settingsSection =
+                worldSection.getConfigurationSection("settings");
+        if (settingsSection == null) {
+            settingsSection = worldSection.createSection("settings");
+        }
+        settingsSection.set("allow-spectator-on-death", spectator);
+        settingsSection.set("allow-tp-after-death", tpAfterDeath);
+
+        saveConfig();
+
+        loadHardcoreWorlds();
+    }
+
+    public void removeHardcoreWorld(String worldName) {
+        if (worldName == null || worldName.isBlank()) return;
+
+        List<String> dimensionNames = getDimensionNamesForWorld(worldName);
+
+        for (String dimensionName : dimensionNames) {
+            removeDimensionData(dimensionName);
+            hardcoreDimensions.remove(dimensionName);
+        }
+
+        ConfigurationSection worldsSection =
+                getConfig().getConfigurationSection("hardcore-worlds");
+        if (worldsSection != null) {
+            worldsSection.set(worldName, null);
+        } else {
+            getConfig().set("hardcore-worlds." + worldName, null);
+        }
+
+        saveConfig();
+
+        loadHardcoreWorlds();
     }
 
     public Set<String> findCullableWorlds() {
-        if (dataStorage == null) return Collections.emptySet();
-        // HardcoreDataStorage expects Set<String> of world names
-        return dataStorage.findCullableWorlds(getHardcoreWorlds(), getHubWorldName());
-    }
-
-    public void removeWorldData(String worldName) {
-        if (dataStorage != null) {
-            dataStorage.removeWorldData(worldName);
+        if (dataStorage == null) {
+            return Collections.emptySet();
         }
 
-        // Also keep the hardcore list and config in sync
-        hardcoreWorlds.remove(worldName);
+        Set<String> dimensionNames = getHardcoreDimensions();
+        Set<String> dimensionCandidates =
+                dataStorage.findCullableWorlds(dimensionNames, getHubWorldName());
 
-        List<String> current = getConfig().getStringList("hardcore-worlds");
-        current.removeIf(w -> w.equalsIgnoreCase(worldName));
-        getConfig().set("hardcore-worlds", current);
-        saveConfig();
-    }
-
-    // ------------------------------------------------------------------------
-    // Hardcore world registry
-    // ------------------------------------------------------------------------
-
-    /** Returns hardcore world names (not settings). */
-    public Set<String> getHardcoreWorlds() {
-        return new HashSet<>(hardcoreWorlds.keySet());
-    }
-
-    /** Adds a new hardcore world, updates in-memory map and config list. */
-    public void addHardcoreWorld(String worldName) {
-        if (worldName == null || worldName.isBlank()) return;
-
-        // Create settings in memory if not already present
-        if (!hardcoreWorlds.containsKey(worldName)) {
-            HardcoreWorldSettings settings = new HardcoreWorldSettings(worldName, getConfig());
-            settings.setAllowSpectatorOnDeath(isAllowSpectatorOnDeath());
-            settings.setAllowTpAfterDeath(isAllowTpAfterDeath());
-            hardcoreWorlds.put(worldName, settings);
+        ConfigurationSection worldsSection =
+                getConfig().getConfigurationSection("hardcore-worlds");
+        if (worldsSection == null) {
+            return Collections.emptySet();
         }
 
-        // Keep config list in sync
-        List<String> current = getConfig().getStringList("hardcore-worlds");
-        if (!current.contains(worldName)) {
-            current.add(worldName);
-            getConfig().set("hardcore-worlds", current);
-            saveConfig();
+        Set<String> result = new HashSet<>();
+
+        for (String worldName : worldsSection.getKeys(false)) {
+            if (worldName == null || worldName.isBlank()) continue;
+
+            List<String> dimensionsInWorld = getDimensionNamesForWorld(worldName);
+            if (dimensionsInWorld.isEmpty()) continue;
+
+            boolean anyCullable = false;
+            for (String dimensionName : dimensionsInWorld) {
+                if (dimensionCandidates.contains(dimensionName)) {
+                    anyCullable = true;
+                    break;
+                }
+            }
+
+            if (anyCullable) {
+                result.add(worldName);
+            }
+        }
+
+        return result;
+    }
+
+    public boolean hardcoreWorldExists(String worldName) {
+        if (worldName == null || worldName.isBlank()) {
+            return false;
+        }
+
+        ConfigurationSection worldsSection = getConfig().getConfigurationSection("hardcore-worlds");
+        if (worldsSection == null) {
+            return false;
+        }
+
+        return worldsSection.isConfigurationSection(worldName);
+    }
+
+    // Player state helpers
+
+    public boolean hasDiedInWorld(UUID playerId, World anyDimension) {
+        if (dataStorage == null || anyDimension == null) return false;
+
+        String dimensionName = anyDimension.getName();
+        // Map from dimension → hardcore world id (e.g. "hc-2_nether" → "hc-2")
+        String worldId = getWorldNameForDimension(dimensionName);
+        if (worldId == null) return false;
+
+        // Get all backing dimensions for that hardcore world
+        java.util.List<String> dimensionsInWorld = getDimensionNamesForWorld(worldId);
+        for (String dimName : dimensionsInWorld) {
+            if (dataStorage.isPlayerDeadInWorld(playerId, dimName)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+
+    public void markPlayerDeadInWorld(UUID playerId, World bukkitWorld) {
+        if (dataStorage == null || bukkitWorld == null) return;
+
+        String dimensionName = bukkitWorld.getName();
+        String worldId = getWorldNameForDimension(dimensionName);
+        if (worldId == null) return;
+
+        java.util.List<String> dimensionsInWorld = getDimensionNamesForWorld(worldId);
+        for (String dimName : dimensionsInWorld) {
+            dataStorage.markPlayerDeadInWorld(playerId, dimName);
         }
     }
 
-    // ------------------------------------------------------------------------
-    // Dependency wiring
-    // ------------------------------------------------------------------------
+    public void markPlayerVisitedWorld(UUID playerId, World bukkitWorld) {
+        if (dataStorage == null || bukkitWorld == null) return;
+
+        String dimensionName = bukkitWorld.getName();
+        String worldId = getWorldNameForDimension(dimensionName);
+        if (worldId == null) return;
+
+        java.util.List<String> dimensionsInWorld = getDimensionNamesForWorld(worldId);
+        for (String dimName : dimensionsInWorld) {
+            dataStorage.markPlayerVisitedWorld(playerId, dimName);
+        }
+    }
+
+
+    // Config access
+
+    public boolean isHardcoreWorld(World world) {
+        if (world == null) return false;
+        return hardcoreDimensions.containsKey(world.getName());
+    }
+
+    public HardcoreWorldSettings getHardcoreWorldSettings(World world) {
+        if (world == null) return null;
+        return hardcoreDimensions.get(world.getName());
+    }
+
+    public boolean isAllowSpectatorOnDeath() {
+        return getConfig().getBoolean("allow-spectator-on-death", true);
+    }
+
+    public boolean isAllowTpAfterDeath() {
+        return getConfig().getBoolean("allow-tp-after-death", false);
+    }
+
+    public int getMaxOpenHardcoreWorlds() {
+        return getConfig().getInt("max-open-hardcore-worlds", 3);
+    }
+
+    public String getHubWorldName() {
+        return getConfig().getString("hub-world", "world");
+    }
+
+    public World getHubWorld() {
+        return Bukkit.getWorld(getHubWorldName());
+    }
+
+    // Dependency / integration helpers
 
     public boolean checkHardDependencies() {
         PluginManager pm = getServer().getPluginManager();
@@ -205,41 +383,111 @@ public class PerWorldHardcorePlugin extends JavaPlugin {
         return multiverseInventories;
     }
 
-    // ------------------------------------------------------------------------
-    // Accessors used by listeners / commands
-    // ------------------------------------------------------------------------
-
-    @SuppressWarnings( "unused")
+    @SuppressWarnings("unused")
     public MessageManager getMessageManager() {
         return messageManager;
     }
 
-    public boolean isHardcoreWorld(String worldName) {
-        return worldName != null && hardcoreWorlds.containsKey(worldName);
+    public void enforceHardDifficultyForWorld(String hardcoreWorldId) {
+        if (hardcoreWorldId == null || hardcoreWorldId.isBlank()) {
+            return;
+        }
+
+        for (String dimName : getDimensionNamesForWorld(hardcoreWorldId)) {
+            setHardDifficultyViaMultiverse(dimName);
+        }
     }
 
-    public HardcoreWorldSettings getHardcoreWorldSettings(String worldName) {
-        return hardcoreWorlds.get(worldName);
+    public void enforceHardDifficultyForAllHardcoreWorlds() {
+        for (String dimName : hardcoreDimensions.keySet()) {
+            setHardDifficultyViaMultiverse(dimName);
+        }
     }
 
-    // Global defaults (still used for now, and for new worlds)
-    public boolean isAllowSpectatorOnDeath() {
-        return getConfig().getBoolean("allow-spectator-on-death", true);
+    // Private helpers (dimensions / storage)
+
+    private Set<String> getHardcoreDimensions() {
+        return new HashSet<>(hardcoreDimensions.keySet());
     }
 
-    public boolean isAllowTpAfterDeath() {
-        return getConfig().getBoolean("allow-tp-after-death", false);
+    // Given a dimension name (Bukkit world), return the hardcore world id
+    private String getWorldNameForDimension(String dimensionName) {
+        if (dimensionName == null) return null;
+        HardcoreWorldSettings settings = hardcoreDimensions.get(dimensionName);
+        if (settings == null) return null;
+        return settings.getWorldName(); // this is your worldId / group name
     }
 
-    public int getMaxOpenHardcoreWorlds() {
-        return getConfig().getInt("max-open-hardcore-worlds", 3);
+    // Given a hardcore world id, return all its backing dimension names
+    public java.util.List<String> getDimensionNamesForWorld(String worldId) {
+        // This is whatever you already had; for clarity, something like:
+        java.util.List<String> result = new java.util.ArrayList<>();
+        org.bukkit.configuration.ConfigurationSection worldsSection =
+                getConfig().getConfigurationSection("hardcore-worlds");
+        if (worldsSection == null || worldId == null || worldId.isBlank()) {
+            return result;
+        }
+
+        org.bukkit.configuration.ConfigurationSection worldSection =
+                worldsSection.getConfigurationSection(worldId);
+        if (worldSection == null) {
+            // Legacy: single-dimension world
+            result.add(worldId);
+            return result;
+        }
+
+        org.bukkit.configuration.ConfigurationSection dimSection =
+                worldSection.getConfigurationSection("dimensions");
+        if (dimSection != null && !dimSection.getKeys(false).isEmpty()) {
+            for (String key : dimSection.getKeys(false)) {
+                String dimName = dimSection.getString(key);
+                if (dimName != null && !dimName.isBlank()) {
+                    result.add(dimName);
+                }
+            }
+        } else {
+            result.add(worldId);
+        }
+
+        return result;
     }
 
-    public String getHubWorldName() {
-        return getConfig().getString("hub-world", "world");
+
+    private void removeDimensionData(String dimensionName) {
+        if (dataStorage != null) {
+            dataStorage.removeWorldData(dimensionName);
+        }
     }
 
-    public World getHubWorld() {
-        return Bukkit.getWorld(getHubWorldName());
+    private boolean isHardcoreDimension(String dimensionName) {
+        return dimensionName != null && hardcoreDimensions.containsKey(dimensionName);
     }
+
+    private HardcoreWorldSettings getHardcoreWorldSettingsForDimension(String dimensionName) {
+        return hardcoreDimensions.get(dimensionName);
+    }
+
+    private void setHardDifficultyViaMultiverse(String worldName) {
+        if (worldName == null || worldName.isBlank()) {
+            return;
+        }
+
+        Plugin mv = getServer().getPluginManager().getPlugin("Multiverse-Core");
+        if (mv == null || !mv.isEnabled()) {
+            // Fallback: just use Bukkit difficulty if MV isn't around
+            World w = Bukkit.getWorld(worldName);
+            if (w != null) {
+                w.setDifficulty(Difficulty.HARD);
+                getLogger().info("Set difficulty to HARD for '" + worldName + "' via Bukkit (Multiverse not available).");
+            }
+            return;
+        }
+
+        // Correct console syntax: /mv modify <world> set difficulty hard
+        String cmd = "mv modify " + worldName + " set difficulty hard";
+        Bukkit.dispatchCommand(Bukkit.getConsoleSender(), cmd);
+        getLogger().info("Set difficulty to HARD for '" + worldName + "' via Multiverse.");
+    }
+
+
 }
