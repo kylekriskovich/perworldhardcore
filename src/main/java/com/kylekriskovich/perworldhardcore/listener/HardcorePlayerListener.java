@@ -8,6 +8,7 @@ import org.bukkit.GameMode;
 import org.bukkit.World;
 import org.bukkit.entity.Player;
 import org.bukkit.event.EventHandler;
+import org.bukkit.event.EventPriority;
 import org.bukkit.event.Listener;
 import org.bukkit.event.entity.PlayerDeathEvent;
 import org.bukkit.event.player.PlayerChangedWorldEvent;
@@ -49,7 +50,7 @@ public class HardcorePlayerListener implements Listener {
         }
 
         UUID playerId = player.getUniqueId();
-        String dimensionName = world.getName();
+        String dimensionName = plugin.getHardcoreWorldId(world);
 
         // Remember which dimension they died in for respawn logic
         lastDeathDimension.put(playerId, dimensionName);
@@ -63,7 +64,8 @@ public class HardcorePlayerListener implements Listener {
     // Respawn
     // ------------------------------------------------------------------------
 
-    @EventHandler
+
+    @EventHandler(priority = EventPriority.MONITOR, ignoreCancelled = true)
     public void onPlayerRespawn(PlayerRespawnEvent event) {
         Player player = event.getPlayer();
         UUID playerId = player.getUniqueId();
@@ -102,6 +104,8 @@ public class HardcorePlayerListener implements Listener {
             return;
         }
 
+        String hardcoreName = plugin.getHardcoreWorldId(basisWorld);
+
         if (settings.isAllowSpectatorOnDeath()) {
             // Respawn inside the hardcore world, but as spectator.
             // If respawn location is outside a hardcore world for some reason,
@@ -111,21 +115,22 @@ public class HardcorePlayerListener implements Listener {
                 event.setRespawnLocation(basisWorld.getSpawnLocation());
             }
 
-            plugin.getServer().getScheduler().runTask(plugin, () -> {
+            plugin.getServer().getScheduler().runTaskLater(plugin, () -> {
                 player.setGameMode(GameMode.SPECTATOR);
                 player.sendMessage(ChatColor.RED + "You have died in hardcore world "
-                        + ChatColor.RED
-                        + ". You may now only spectate this world.");
-            });
+                        + ChatColor.GOLD + hardcoreName
+                        + ChatColor.RED + ". You may now only spectate this world.");
+            }, 2L); // 2 ticks later
+
         } else {
             // No spectator allowed: force respawn at hub in survival
             event.setRespawnLocation(hub.getSpawnLocation());
-            plugin.getServer().getScheduler().runTask(plugin, () -> {
+            plugin.getServer().getScheduler().runTaskLater(plugin, () -> {
                 player.setGameMode(GameMode.SURVIVAL);
                 player.sendMessage(ChatColor.RED + "You have died in hardcore world "
-                        + ChatColor.RED
-                        + ". You have been returned to the hub.");
-            });
+                        + ChatColor.GOLD + hardcoreName
+                        + ChatColor.RED + ". You have been returned to the hub.");
+            }, 2L);
         }
     }
 
@@ -133,13 +138,13 @@ public class HardcorePlayerListener implements Listener {
     // Join / World change → enforce restrictions + track visits
     // ------------------------------------------------------------------------
 
-    @EventHandler
+    @EventHandler(priority = EventPriority.MONITOR, ignoreCancelled = true)
     public void onPlayerJoin(PlayerJoinEvent event) {
         Player player = event.getPlayer();
         handleEnterWorld(player, player.getWorld());
     }
 
-    @EventHandler
+    @EventHandler(priority = EventPriority.MONITOR, ignoreCancelled = true)
     public void onPlayerChangedWorld(PlayerChangedWorldEvent event) {
         Player player = event.getPlayer();
         handleEnterWorld(player, player.getWorld());
@@ -173,23 +178,25 @@ public class HardcorePlayerListener implements Listener {
                 plugin.getLogger().warning("Hub world not found; cannot redirect join/world-change.");
                 return;
             }
+            String hardcoreName = plugin.getHardcoreWorldId(world);
 
             if (settings.isAllowSpectatorOnDeath()) {
-                plugin.getServer().getScheduler().runTask(plugin, () -> {
+                plugin.getServer().getScheduler().runTaskLater(plugin, () -> {
                     player.setGameMode(GameMode.SPECTATOR);
-                    player.sendMessage(ChatColor.RED + "You have already died in hardcore world "
-                            + ChatColor.RED
-                            + ". You are now in spectator mode.");
-                });
+                    player.sendMessage(ChatColor.RED + "You have died in hardcore world "
+                            + ChatColor.GOLD + hardcoreName
+                            + ChatColor.RED + ". You may now only spectate this world.");
+                }, 2L);
 
             } else {
-                plugin.getServer().getScheduler().runTask(plugin, () -> {
+                plugin.getServer().getScheduler().runTaskLater(plugin, () -> {
                     player.teleport(hub.getSpawnLocation());
                     player.setGameMode(GameMode.SURVIVAL);
                     player.sendMessage(ChatColor.RED + "You cannot re-enter hardcore world "
-                            + ChatColor.RED
-                            + " because you have already died there.");
-                });
+                            + ChatColor.GOLD + hardcoreName
+                            + ChatColor.RED + " because you have already died there.");
+                }, 2L);
+
             }
         }
     }

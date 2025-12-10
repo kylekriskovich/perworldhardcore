@@ -9,6 +9,7 @@ import com.kylekriskovich.perworldhardcore.util.MessageManager;
 
 import org.bukkit.Bukkit;
 import org.bukkit.World;
+import org.bukkit.Difficulty;
 import org.bukkit.configuration.ConfigurationSection;
 import org.bukkit.plugin.Plugin;
 import org.bukkit.plugin.PluginManager;
@@ -43,6 +44,8 @@ public class PerWorldHardcorePlugin extends JavaPlugin {
 
         dataStorage = new HardcoreDataStorage(this);
         dataStorage.init();
+
+        enforceHardDifficultyForAllHardcoreWorlds();
 
         getLogger().info("PerWorldHardcore enabled. Hardcore worlds: " + hardcoreDimensions.keySet());
 
@@ -114,6 +117,18 @@ public class PerWorldHardcorePlugin extends JavaPlugin {
             return 0;
         }
         return worldsSection.getKeys(false).size();
+    }
+
+    public String getHardcoreWorldId(World world) {
+        if (world == null) return null;
+
+        HardcoreWorldSettings settings = hardcoreDimensions.get(world.getName());
+        if (settings == null) {
+            return null;
+        }
+
+        // HardcoreWorldSettings.worldName is your hardcore world id / group name
+        return settings.getWorldName();
     }
 
     public void addHardcoreWorld(String worldName,
@@ -195,35 +210,6 @@ public class PerWorldHardcorePlugin extends JavaPlugin {
         loadHardcoreWorlds();
     }
 
-    public List<String> getDimensionNamesForWorld(String worldName) {
-        List<String> result = new ArrayList<>();
-        if (worldName == null || worldName.isBlank()) return result;
-
-        ConfigurationSection worldsSection =
-                getConfig().getConfigurationSection("hardcore-worlds");
-        if (worldsSection == null) return result;
-
-        ConfigurationSection worldSection = worldsSection.getConfigurationSection(worldName);
-        if (worldSection == null) {
-            result.add(worldName);
-            return result;
-        }
-
-        ConfigurationSection dimSection = worldSection.getConfigurationSection("dimensions");
-        if (dimSection != null && !dimSection.getKeys(false).isEmpty()) {
-            for (String key : dimSection.getKeys(false)) {
-                String dimensionName = dimSection.getString(key);
-                if (dimensionName != null && !dimensionName.isBlank()) {
-                    result.add(dimensionName);
-                }
-            }
-        } else {
-            result.add(worldName);
-        }
-
-        return result;
-    }
-
     public Set<String> findCullableWorlds() {
         if (dataStorage == null) {
             return Collections.emptySet();
@@ -278,14 +264,16 @@ public class PerWorldHardcorePlugin extends JavaPlugin {
 
     // Player state helpers
 
-    public boolean hasDiedInWorld(UUID playerId, World bukkitWorld) {
-        if (dataStorage == null || bukkitWorld == null) return false;
+    public boolean hasDiedInWorld(UUID playerId, World anyDimension) {
+        if (dataStorage == null || anyDimension == null) return false;
 
-        String dimensionName = bukkitWorld.getName();
-        String worldName = getWorldNameForDimension(dimensionName);
-        if (worldName == null) return false;
+        String dimensionName = anyDimension.getName();
+        // Map from dimension → hardcore world id (e.g. "hc-2_nether" → "hc-2")
+        String worldId = getWorldNameForDimension(dimensionName);
+        if (worldId == null) return false;
 
-        List<String> dimensionsInWorld = getDimensionNamesForWorld(worldName);
+        // Get all backing dimensions for that hardcore world
+        java.util.List<String> dimensionsInWorld = getDimensionNamesForWorld(worldId);
         for (String dimName : dimensionsInWorld) {
             if (dataStorage.isPlayerDeadInWorld(playerId, dimName)) {
                 return true;
@@ -294,14 +282,15 @@ public class PerWorldHardcorePlugin extends JavaPlugin {
         return false;
     }
 
+
     public void markPlayerDeadInWorld(UUID playerId, World bukkitWorld) {
         if (dataStorage == null || bukkitWorld == null) return;
 
         String dimensionName = bukkitWorld.getName();
-        String worldName = getWorldNameForDimension(dimensionName);
-        if (worldName == null) return;
+        String worldId = getWorldNameForDimension(dimensionName);
+        if (worldId == null) return;
 
-        List<String> dimensionsInWorld = getDimensionNamesForWorld(worldName);
+        java.util.List<String> dimensionsInWorld = getDimensionNamesForWorld(worldId);
         for (String dimName : dimensionsInWorld) {
             dataStorage.markPlayerDeadInWorld(playerId, dimName);
         }
@@ -311,25 +300,26 @@ public class PerWorldHardcorePlugin extends JavaPlugin {
         if (dataStorage == null || bukkitWorld == null) return;
 
         String dimensionName = bukkitWorld.getName();
-        String worldName = getWorldNameForDimension(dimensionName);
-        if (worldName == null) return;
+        String worldId = getWorldNameForDimension(dimensionName);
+        if (worldId == null) return;
 
-        List<String> dimensionsInWorld = getDimensionNamesForWorld(worldName);
+        java.util.List<String> dimensionsInWorld = getDimensionNamesForWorld(worldId);
         for (String dimName : dimensionsInWorld) {
             dataStorage.markPlayerVisitedWorld(playerId, dimName);
         }
     }
 
+
     // Config access
 
-    public boolean isHardcoreWorld(World bukkitWorld) {
-        if (bukkitWorld == null) return false;
-        return isHardcoreDimension(bukkitWorld.getName());
+    public boolean isHardcoreWorld(World world) {
+        if (world == null) return false;
+        return hardcoreDimensions.containsKey(world.getName());
     }
 
-    public HardcoreWorldSettings getHardcoreWorldSettings(World bukkitWorld) {
-        if (bukkitWorld == null) return null;
-        return getHardcoreWorldSettingsForDimension(bukkitWorld.getName());
+    public HardcoreWorldSettings getHardcoreWorldSettings(World world) {
+        if (world == null) return null;
+        return hardcoreDimensions.get(world.getName());
     }
 
     public boolean isAllowSpectatorOnDeath() {
@@ -398,19 +388,70 @@ public class PerWorldHardcorePlugin extends JavaPlugin {
         return messageManager;
     }
 
+    public void enforceHardDifficultyForWorld(String hardcoreWorldId) {
+        if (hardcoreWorldId == null || hardcoreWorldId.isBlank()) {
+            return;
+        }
+
+        for (String dimName : getDimensionNamesForWorld(hardcoreWorldId)) {
+            setHardDifficultyViaMultiverse(dimName);
+        }
+    }
+
+    public void enforceHardDifficultyForAllHardcoreWorlds() {
+        for (String dimName : hardcoreDimensions.keySet()) {
+            setHardDifficultyViaMultiverse(dimName);
+        }
+    }
+
     // Private helpers (dimensions / storage)
 
     private Set<String> getHardcoreDimensions() {
         return new HashSet<>(hardcoreDimensions.keySet());
     }
 
+    // Given a dimension name (Bukkit world), return the hardcore world id
     private String getWorldNameForDimension(String dimensionName) {
         if (dimensionName == null) return null;
         HardcoreWorldSettings settings = hardcoreDimensions.get(dimensionName);
         if (settings == null) return null;
-
-        return settings.getWorldName();
+        return settings.getWorldName(); // this is your worldId / group name
     }
+
+    // Given a hardcore world id, return all its backing dimension names
+    public java.util.List<String> getDimensionNamesForWorld(String worldId) {
+        // This is whatever you already had; for clarity, something like:
+        java.util.List<String> result = new java.util.ArrayList<>();
+        org.bukkit.configuration.ConfigurationSection worldsSection =
+                getConfig().getConfigurationSection("hardcore-worlds");
+        if (worldsSection == null || worldId == null || worldId.isBlank()) {
+            return result;
+        }
+
+        org.bukkit.configuration.ConfigurationSection worldSection =
+                worldsSection.getConfigurationSection(worldId);
+        if (worldSection == null) {
+            // Legacy: single-dimension world
+            result.add(worldId);
+            return result;
+        }
+
+        org.bukkit.configuration.ConfigurationSection dimSection =
+                worldSection.getConfigurationSection("dimensions");
+        if (dimSection != null && !dimSection.getKeys(false).isEmpty()) {
+            for (String key : dimSection.getKeys(false)) {
+                String dimName = dimSection.getString(key);
+                if (dimName != null && !dimName.isBlank()) {
+                    result.add(dimName);
+                }
+            }
+        } else {
+            result.add(worldId);
+        }
+
+        return result;
+    }
+
 
     private void removeDimensionData(String dimensionName) {
         if (dataStorage != null) {
@@ -425,4 +466,28 @@ public class PerWorldHardcorePlugin extends JavaPlugin {
     private HardcoreWorldSettings getHardcoreWorldSettingsForDimension(String dimensionName) {
         return hardcoreDimensions.get(dimensionName);
     }
+
+    private void setHardDifficultyViaMultiverse(String worldName) {
+        if (worldName == null || worldName.isBlank()) {
+            return;
+        }
+
+        Plugin mv = getServer().getPluginManager().getPlugin("Multiverse-Core");
+        if (mv == null || !mv.isEnabled()) {
+            // Fallback: just use Bukkit difficulty if MV isn't around
+            World w = Bukkit.getWorld(worldName);
+            if (w != null) {
+                w.setDifficulty(Difficulty.HARD);
+                getLogger().info("Set difficulty to HARD for '" + worldName + "' via Bukkit (Multiverse not available).");
+            }
+            return;
+        }
+
+        // Correct console syntax: /mv modify <world> set difficulty hard
+        String cmd = "mv modify " + worldName + " set difficulty hard";
+        Bukkit.dispatchCommand(Bukkit.getConsoleSender(), cmd);
+        getLogger().info("Set difficulty to HARD for '" + worldName + "' via Multiverse.");
+    }
+
+
 }

@@ -3,6 +3,7 @@ package com.kylekriskovich.perworldhardcore.command;
 import com.kylekriskovich.perworldhardcore.PerWorldHardcorePlugin;
 import com.kylekriskovich.perworldhardcore.model.HardcoreDimension;
 import org.bukkit.Bukkit;
+import org.bukkit.ChatColor;
 import org.bukkit.World;
 import org.bukkit.command.Command;
 import org.bukkit.command.CommandExecutor;
@@ -89,7 +90,7 @@ public class HardcoreCommands implements CommandExecutor {
     }
 
     private void cullWorlds(CommandSender sender, boolean delete) {
-        // Now returns hardcore world ids (config keys)
+        // World-level (hardcore world id) candidates
         Set<String> worldCandidates = plugin.findCullableWorlds();
 
         if (worldCandidates.isEmpty()) {
@@ -104,17 +105,52 @@ public class HardcoreCommands implements CommandExecutor {
             return;
         }
 
-        sender.sendMessage("Deleting worlds via Multiverse...");
+        // Split into: safe to delete vs blocked (players online)
+        List<String> blocked = new ArrayList<>();
+        List<String> toCull = new ArrayList<>();
 
         for (String worldId : worldCandidates) {
-            // Ask plugin for the physical Bukkit world names (dimensions)
+            boolean hasPlayers = false;
+
+            // Check all backing dimensions for online players
+            for (String dimensionName : plugin.getDimensionNamesForWorld(worldId)) {
+                World dimWorld = Bukkit.getWorld(dimensionName);
+                if (dimWorld != null && !dimWorld.getPlayers().isEmpty()) {
+                    hasPlayers = true;
+                    break;
+                }
+            }
+
+            if (hasPlayers) {
+                blocked.add(worldId);
+            } else {
+                toCull.add(worldId);
+            }
+        }
+
+        if (!blocked.isEmpty()) {
+            sender.sendMessage("Skipping hardcore worlds with online players: "
+                    + String.join(", ", blocked));
+        }
+
+        if (toCull.isEmpty()) {
+            sender.sendMessage("No hardcore worlds are safe to cull right now.");
+            return;
+        }
+
+        sender.sendMessage("Deleting worlds via Multiverse...");
+
+        // Actually delete each safe hardcore world (all dimensions) via Multiverse
+        for (String worldId : toCull) {
             List<String> dimensionNames = plugin.getDimensionNamesForWorld(worldId);
 
             for (String dimensionName : dimensionNames) {
-                Bukkit.dispatchCommand(Bukkit.getConsoleSender(), "mv delete " + dimensionName);
+                dispatchConsole(
+                        Bukkit.getConsoleSender(),
+                        "mv delete " + dimensionName
+                );
             }
 
-            // Remove the hardcore world + its data
             plugin.removeHardcoreWorld(worldId);
         }
 
@@ -129,12 +165,12 @@ public class HardcoreCommands implements CommandExecutor {
             return;
         }
 
-        String worldId = args[1];
+        String worldId = args[1]; // player-facing hardcore world name
 
         int maxWorlds = plugin.getMaxOpenHardcoreWorlds();
         int currentWorlds = plugin.getHardcoreWorldCount();
         if (currentWorlds >= maxWorlds) {
-            sender.sendMessage("Cannot create more hardcore worlds. Limit is " + maxWorlds + " groups.");
+            sender.sendMessage("Cannot create more hardcore worlds. Limit is " + maxWorlds + ".");
             return;
         }
 
@@ -147,12 +183,16 @@ public class HardcoreCommands implements CommandExecutor {
         Boolean allowSpectatorOverride = null;
         Boolean allowTpAfterDeathOverride = null;
 
-        List<String> mvArgs = new ArrayList<>();
-        boolean hasSeedArg = false;
+        // mvArgsOverworld: all mv create args for overworld
+        // mvArgsOtherDims: same args but with any seed-related flags stripped; we will inject -s <seed>
+        List<String> mvArgsOverworld = new ArrayList<>();
+        List<String> mvArgsOtherDims = new ArrayList<>();
 
+        // Parse flags after <WorldName>
         for (int i = 2; i < args.length; i++) {
             String arg = args[i];
 
+            // Plugin-specific flags (not forwarded to mv create)
             if (arg.startsWith("--allow-spectator-on-death=")) {
                 String value = arg.substring("--allow-spectator-on-death=".length());
                 allowSpectatorOverride = parseBooleanFlag(value);
@@ -171,103 +211,130 @@ public class HardcoreCommands implements CommandExecutor {
                 continue;
             }
 
+            // Seed flags: pass to overworld only (we inject real seed for nether/end)
             if (arg.equalsIgnoreCase("-s") && i + 1 < args.length) {
-                hasSeedArg = true;
-                mvArgs.add(arg);          // "-s"
-                mvArgs.add(args[++i]);    // seed value
+                String seedValue = args[++i]; // consume next token
+                mvArgsOverworld.add("-s");
+                mvArgsOverworld.add(seedValue);
+                // Don't add to mvArgsOtherDims
                 continue;
             }
 
             if (arg.startsWith("--seed=")) {
-                hasSeedArg = true;
-                mvArgs.add(arg);
+                mvArgsOverworld.add(arg);
+                // Don't add to mvArgsOtherDims
                 continue;
             }
 
-            mvArgs.add(arg);
+            // Generator flags: handle NORMAL specially to avoid "Plugin 'NORMAL' does not exist"
+            if (arg.equalsIgnoreCase("-g") && i + 1 < args.length) {
+                String gen = args[++i]; // consume next token
+
+                if (gen.equalsIgnoreCase("NORMAL")) {
+                    // Ignore this – Multiverse "environment" already handles NORMAL.
+                    sender.sendMessage(ChatColor.YELLOW +
+                            "[PerWorldHardcore] Ignoring '-g NORMAL' (use -t LARGE_BIOMES/FLAT/etc for world type).");
+                    continue;
+                }
+
+                // Custom generator plugin – forward to both overworld and other dims
+                mvArgsOverworld.add("-g");
+                mvArgsOverworld.add(gen);
+                mvArgsOtherDims.add("-g");
+                mvArgsOtherDims.add(gen);
+                continue;
+            }
+
+            if (arg.startsWith("--generator=")) {
+                String gen = arg.substring("--generator=".length());
+
+                if (gen.equalsIgnoreCase("NORMAL")) {
+                    sender.sendMessage(ChatColor.YELLOW +
+                            "[PerWorldHardcore] Ignoring '--generator=NORMAL' (use -t LARGE_BIOMES/FLAT/etc for world type).");
+                    continue;
+                }
+
+                mvArgsOverworld.add(arg);
+                mvArgsOtherDims.add(arg);
+                continue;
+            }
+
+            // All other mv args get forwarded to both overworld and other dimensions
+            mvArgsOverworld.add(arg);
+            mvArgsOtherDims.add(arg);
         }
 
-        // Build the backing dimension names for this hardcore world
+
+        // Build dimension names for this hardcore world
         Map<HardcoreDimension, String> dimensionNames = new EnumMap<>(HardcoreDimension.class);
         for (HardcoreDimension dim : HardcoreDimension.values()) {
             String dimensionWorldName = dim.worldNameForWorld(worldId);
             dimensionNames.put(dim, dimensionWorldName);
         }
 
+        // Ensure Multiverse-Core is present
         Plugin mv = Bukkit.getPluginManager().getPlugin("Multiverse-Core");
         if (mv == null || !mv.isEnabled()) {
             sender.sendMessage("Multiverse-Core is not available. Cannot create worlds.");
             return;
         }
 
-        String baseArgs = "";
-        if (!mvArgs.isEmpty()) {
-            baseArgs = " " + String.join(" ", mvArgs);
-        }
+        // Create OVERWORLD first -----------------------------------------------
+        String overworldName = dimensionNames.get(HardcoreDimension.OVERWORLD);
+        String overworldEnv = HardcoreDimension.OVERWORLD.getMultiverseEnvironment();
 
-        sender.sendMessage("Creating hardcore world group '" + worldId + "' via Multiverse...");
-        for (HardcoreDimension dim : HardcoreDimension.values()) {
-            String dimensionWorldName = dimensionNames.get(dim);
-            sender.sendMessage("  " + dim.name() + ": " + dimensionWorldName);
-        }
+        String overworldExtraArgs = mvArgsOverworld.isEmpty()
+                ? ""
+                : " " + String.join(" ", mvArgsOverworld);
 
-        // --- Actual world creation logic ---------------------------------------
+        sender.sendMessage("Creating hardcore world '" + worldId + "' via Multiverse...");
+        sender.sendMessage("  OVERWORLD: " + overworldName);
 
-        if (hasSeedArg) {
-            // User specified a seed: use the same args for all three dimensions
-            for (HardcoreDimension dim : HardcoreDimension.values()) {
-                String dimensionWorldName = dimensionNames.get(dim);
-                String env = dim.getMultiverseEnvironment();
-                dispatchConsole(sender, "mv create " + dimensionWorldName + " " + env + baseArgs);
-            }
-        } else {
-            // No seed specified:
-            // 1) Create overworld with NO seed flag
-            String overworldName = dimensionNames.get(HardcoreDimension.OVERWORLD);
-            String overworldEnv = HardcoreDimension.OVERWORLD.getMultiverseEnvironment();
+        dispatchConsole(sender, "mv create " + overworldName + " " + overworldEnv + overworldExtraArgs);
 
-            dispatchConsole(sender, "mv create " + overworldName + " " + overworldEnv + baseArgs);
+        Boolean finalAllowSpectatorOverride = allowSpectatorOverride;
+        Boolean finalAllowTpAfterDeathOverride = allowTpAfterDeathOverride;
 
-            // 2) Read overworld seed
-            long seed = 0L;
-            boolean haveSeed = false;
+        plugin.getServer().getScheduler().runTaskLater(plugin, () -> {
             World overworld = Bukkit.getWorld(overworldName);
-            if (overworld != null) {
-                seed = overworld.getSeed();
-                haveSeed = true;
-            } else {
-                plugin.getLogger().warning(
-                        "Could not load overworld '" + overworldName +
-                                "' after creation; nether/end will use their own random seeds.");
+            if (overworld == null) {
+                sender.sendMessage(ChatColor.RED + "Could not find overworld '" + overworldName + "' after mv create. Aborting nether/end creation.");
+                return;
             }
 
-            // 3) Create nether + end using that seed (if we could read it)
-            for (HardcoreDimension dim : HardcoreDimension.values()) {
-                if (dim == HardcoreDimension.OVERWORLD) {
-                    continue; // already created
-                }
+            long seed = overworld.getSeed();
+            sender.sendMessage("  Using seed " + seed + " for NETHER and THE_END.");
 
-                String dimensionWorldName = dimensionNames.get(dim);
+            String otherDimsBaseArgs = mvArgsOtherDims.isEmpty()
+                    ? ""
+                    : " " + String.join(" ", mvArgsOtherDims);
+            String seedArg = " -s " + seed;
+
+            for (HardcoreDimension dim : HardcoreDimension.values()) {
+                if (dim == HardcoreDimension.OVERWORLD) continue;
+
+                String dimName = dimensionNames.get(dim);
                 String env = dim.getMultiverseEnvironment();
 
-                String cmd = "mv create " + dimensionWorldName + " " + env + baseArgs;
-                if (haveSeed) {
-                    cmd = cmd + " -s " + seed;
-                }
+                sender.sendMessage("  " + dim.name() + ": " + dimName);
+                String cmd = "mv create " + dimName + " " + env + otherDimsBaseArgs + seedArg;
                 dispatchConsole(sender, cmd);
             }
-        }
 
-        // Register the hardcore world + config
-        plugin.addHardcoreWorld(
-                worldId,
-                dimensionNames,
-                allowSpectatorOverride,
-                allowTpAfterDeathOverride
-        );
+            plugin.addHardcoreWorld(
+                    worldId,
+                    dimensionNames,
+                    finalAllowSpectatorOverride,
+                    finalAllowTpAfterDeathOverride
+            );
 
-        sender.sendMessage("Hardcore world group '" + worldId + "' created and registered.");
+            plugin.enforceHardDifficultyForWorld(worldId);
+
+            sender.sendMessage("Hardcore world '" + worldId + "' created and registered.");
+
+        }, 1L); // 1 tick later
     }
+
 
     // ------------------------------------------------------------------------
     // Helpers
